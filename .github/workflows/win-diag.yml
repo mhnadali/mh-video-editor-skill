@@ -1,7 +1,7 @@
 name: win-diag
 
-# Temporary Windows diagnostic to pinpoint the install.ps1 smoke failure via per-job conclusions
-# (the authoring session cannot read Actions logs). Removed once Windows CI is green.
+# Temporary Windows diagnostic: reproduce the main job's three steps as separate jobs so the failing one is
+# visible from the check-run conclusions (the authoring session cannot read Actions logs). Removed once green.
 
 on:
   push:
@@ -16,38 +16,33 @@ jobs:
   diag:
     name: win ${{ matrix.mod }}
     runs-on: windows-latest
-    timeout-minutes: 20
+    timeout-minutes: 40
     strategy:
       fail-fast: false
       matrix:
-        mod: [smoke_parse, smoke_run_bypass, smoke_files_bypass, smoke_run_plain]
+        mod: [gate_doctor, full_suite, main_smoke]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Run
+      - name: Install FFmpeg
+        run: choco install ffmpeg --no-progress -y
+      - name: Doctor (exact main step)
+        if: matrix.mod == 'gate_doctor'
+        run: python engine/scripts/mh_video.py doctor
+      - name: Full suite (exact main step)
+        if: matrix.mod == 'full_suite'
+        run: python engine/tests/run_tests.py --durations 15
+      - name: Installer smoke (exact main step)
+        if: matrix.mod == 'main_smoke'
         shell: pwsh
         run: |
           $fake = Join-Path $env:RUNNER_TEMP "fakehome"
           New-Item -ItemType Directory -Force $fake | Out-Null
+          $HOME = $fake
           $env:USERPROFILE = $fake
-          if ("${{ matrix.mod }}" -eq "smoke_parse") {
-            $errs = $null
-            [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path .\install.ps1), [ref]$null, [ref]$errs) | Out-Null
-            if ($errs) { $errs | ForEach-Object { Write-Host $_.Message }; throw "parse errors: $($errs.Count)" }
-            Write-Host "install.ps1 parses clean"
-          } elseif ("${{ matrix.mod }}" -eq "smoke_run_plain") {
-            & .\install.ps1
-            $global:LASTEXITCODE = 0
-          } elseif ("${{ matrix.mod }}" -eq "smoke_run_bypass") {
-            Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
-            & .\install.ps1
-            $global:LASTEXITCODE = 0
-          } else {
-            Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
-            try { & .\install.ps1 } catch { Write-Host "install threw: $_" }
-            $global:LASTEXITCODE = 0
-            if (-not (Test-Path (Join-Path $fake ".claude\skills\mh-video-editor-skill\SKILL.md"))) { throw "SKILL.md missing" }
-            if (-not (Test-Path (Join-Path $fake ".claude\agents\mh-video-editor.md"))) { throw "agent missing" }
-          }
+          & .\install.ps1
+          $global:LASTEXITCODE = 0
+          if (-not (Test-Path (Join-Path $fake ".claude\skills\mh-video-editor-skill\SKILL.md"))) { throw "skill not installed" }
+          if (-not (Test-Path (Join-Path $fake ".claude\agents\mh-video-editor.md"))) { throw "agent not installed" }
