@@ -38,7 +38,18 @@ Request -> Step 0 discovery -> video-brief.md (CONFIRMED, frozen)
 | `vid_color.py` | correction maths, looks, 33^3 LUT builder, .cube read/write, auto-correction planner, scopes |
 | `vid_text.py` | font discovery, Persian shaping helpers, wrapping, safe areas, SRT, ASS builder |
 | `vid_sfx.py` | whoosh mapping and synthesis, ambient segments and levels |
+| `vid_editorial.py` | editorial measurement (shot size, camera motion, saliency) and editorial lint - the 'why' of the cut |
+| `vid_deliver.py` | delivery presets, size/bitrate targeting, render manifest, project bundle, cache GC |
 | `mh_video.py` | CLI |
+
+## Editorial intelligence: the engine measures, the agent judges
+
+Shot grammar, pacing, continuity, colour balance and music structure are all **measured** with FFmpeg + pure-Python
+signal processing (`vid_editorial.py`, `vid_beats.detect_sections`, `vid_color`); the creative **judgement** - which cut
+serves the emotion and the story - stays with the agent, guided by `references/editorial-rubric.md`. Every measured
+signal is a reviewable number on a score entry or in the EDL, never a hidden decision. Truly semantic perception
+(faces, objects, speech) would need ML, which the project excludes (standard library + FFmpeg, no downloads); the
+heuristic signals (motion saliency, edge/entropy, colour) are enough for reframe, interest and continuity.
 
 ## Per-shot part chain (order matters)
 ```

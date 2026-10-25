@@ -104,7 +104,12 @@ def cmd_beats(a) -> int:
     if a.out:
         vl.save_json(a.out, res)
     print(json.dumps({k: v for k, v in res.items() if k not in ("beats", "note")}, indent=2))
-    print(f"beats: {len(res['beats'])} (first: {res['beats'][:4]}); downbeats every 4th from index {res['bar_phase']}")
+    print(f"beats: {len(res['beats'])} (first: {res['beats'][:4]}); downbeats every {res.get('beats_per_bar', 4)}th from index {res['bar_phase']}")
+    secs = res.get("sections") or []
+    if secs:
+        print(f"sections: {len(secs)} ({', '.join(s['label'] for s in secs)})")
+        for s in secs:
+            print(f"  {s['label']:6} {s['start']:.2f}-{s['end']:.2f}s  energy {s['energy']}")
     v = res["validation"]
     print(f"validation: second tempo {v['second_tempo_bpm']} BPM ({v['second_relation']}), drift {v['drift_pct']}%, "
           f"median onset error {v['median_onset_error_ms']} ms, bar confidence {v['bar_confidence']}")
@@ -184,9 +189,12 @@ def cmd_need(a) -> int:
     import vid_plan
     beats = vl.load_json(a.beats)
     body_t0 = vid_plan.body_start_time(beats, a.duration or beats["duration"], a.period or beats["period"], a.intro_shots)
-    lay = vid_plan.layout(a.duration or beats["duration"], body_t0, a.period or beats["period"], a.intro_shots)
+    if a.pacing == "energy":
+        lay = vid_plan.layout_paced(beats, a.duration or beats["duration"], body_t0, a.period or beats["period"], a.intro_shots)
+    else:
+        lay = vid_plan.layout(a.duration or beats["duration"], body_t0, a.period or beats["period"], a.intro_shots)
     print(json.dumps({"clips_needed": lay["shots"], "intro_shots": a.intro_shots, "body_beats": lay["last_beat"],
-                      "body_starts_at": body_t0}))
+                      "body_starts_at": body_t0, "pacing": a.pacing or "beat"}))
     return 0
 
 
@@ -200,7 +208,7 @@ def cmd_plan(a) -> int:
         print(f"best_start filled from scores for {n} clips")
     edl = vid_plan.plan(clips, beats, name=a.name, music=a.music or beats.get("file"), preset=a.preset,
                         duration=a.duration, intro_shots=a.intro_shots, period=a.period, grade=a.grade,
-                        transitions=not a.no_transitions, align_bars=a.bar_align)
+                        transitions=not a.no_transitions, align_bars=a.bar_align, pacing=a.pacing)
     vl.save_json(a.out, edl)
     print(f"wrote {a.out}: {len(edl['shots'])} shots, {len(edl['transitions'])} transitions")
     return 0
@@ -457,6 +465,7 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("need", help="how many clips a beat grid needs")
     p.add_argument("beats"); p.add_argument("--duration", type=float); p.add_argument("--period", type=float)
     p.add_argument("--intro-shots", type=int, default=2)
+    p.add_argument("--pacing", choices=["beat", "energy"], help="energy = hold calm beats, cut fast on strong ones (Track B)")
     p.set_defaults(fn=cmd_need)
     p = sub.add_parser("plan", help="beat grid + ordered clip list -> EDL")
     p.add_argument("--beats", required=True); p.add_argument("--clips", required=True); p.add_argument("--out", required=True)
@@ -465,6 +474,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--intro-shots", type=int, default=2); p.add_argument("--grade", default="warm-desert")
     p.add_argument("--no-transitions", action="store_true")
     p.add_argument("--bar-align", action="store_true", help="start the body on a downbeat (needs bar_phase in beats.json)")
+    p.add_argument("--pacing", choices=["beat", "energy"], help="energy = hold calm beats, cut fast on strong ones (Track B)")
     p.add_argument("--scores", help="work folder containing scores.json: fill src_start from each clip's best window")
     p.set_defaults(fn=cmd_plan)
     p = sub.add_parser("lint", help="check an EDL: structure, restraint budget, files, FFmpeg capabilities")
@@ -502,7 +512,7 @@ def build_parser() -> argparse.ArgumentParser:
     q.add_argument("--scope", help="also write a waveform/vectorscope/histogram sheet here")
     q = csub.add_parser("plan", help="propose per-shot corrections for an EDL (dry run unless --write)"); q.add_argument("edl"); q.add_argument("--match", default="exposure", choices=["exposure", "reference", "none"])
     q.add_argument("--reference", type=int, help="shot number to match (with --match reference)"); q.add_argument("--strength", type=float, default=0.8)
-    q.add_argument("--wb", choices=["off", "median", "gray-world"], help="white balance: median (default with --match exposure), gray-world (opt-in), off")
+    q.add_argument("--wb", choices=["off", "median", "gray-world", "skin"], help="white balance: median (default with --match exposure), gray-world (opt-in), skin (protects warmth), off")
     q.add_argument("--only", help="shot numbers, e.g. 0-5,9"); q.add_argument("--write", action="store_true"); q.add_argument("--overwrite", action="store_true")
     p.set_defaults(fn=cmd_color)
     p = sub.add_parser("text", help="on-screen text (Persian right-to-left supported)")

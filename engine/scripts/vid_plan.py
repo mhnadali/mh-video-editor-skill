@@ -8,6 +8,7 @@ Transitions: a few, all different, on a ~45% share of the cuts; the drop cut get
 """
 from __future__ import annotations
 
+import bisect
 import math
 import os
 from pathlib import Path
@@ -94,6 +95,47 @@ def layout(duration: float, t0: float, period: float, intro_shots: int = 2, min_
     return {"shots": len(cuts) + 1, "cuts": cuts, "last_beat": last_beat}
 
 
+def strength_at(beats: dict, t: float) -> float:
+    """Onset strength (0-1) of the beat nearest time `t` (1.0 if the track has no measured strengths)."""
+    times = beats.get("beats") or []
+    st = beats.get("beat_strength") or []
+    if not times or not st:
+        return 1.0
+    i = bisect.bisect_left(times, t)
+    cands = [j for j in (i - 1, i) if 0 <= j < len(times)]
+    if not cands:
+        return 1.0
+    j = min(cands, key=lambda j: abs(times[j] - t))
+    return st[j] if j < len(st) else 1.0
+
+
+def layout_paced(beats: dict, duration: float, t0: float, period: float, intro_shots: int = 2,
+                 min_tail_beats: float = 1.5, hold_threshold: float = 0.5) -> dict:
+    """Energy-aware geometry (Track B): calm beats are held two at a time (longer shots), strong beats cut every beat.
+
+    This makes the shot-length rhythm carry the music's energy instead of a mechanical one-shot-per-beat. The number of
+    shots therefore depends on the track, so `need --pacing energy` reports it and the clip list must match it.
+    """
+    if intro_shots < 0:
+        raise vl.EngineError("intro_shots must be >= 0")
+    if t0 <= 0 and intro_shots:
+        raise vl.EngineError("body starts at 0 s; use intro_shots=0")
+    last_beat = int(math.floor((duration - t0 - min_tail_beats * period) / period))
+    if last_beat < 1:
+        raise vl.EngineError("music is too short for this tempo/intro")
+    cuts: list[float] = []
+    for i in range(1, intro_shots):
+        cuts.append(round(t0 * i / intro_shots, 4))
+    if intro_shots:
+        cuts.append(round(t0, 4))
+    k = 1
+    while k <= last_beat:
+        t = t0 + k * period
+        cuts.append(round(t, 4))
+        k += 1 if strength_at(beats, t) >= hold_threshold else 2      # hold calm beats, cut fast on strong ones
+    return {"shots": len(cuts) + 1, "cuts": cuts, "last_beat": last_beat}
+
+
 def auto_transitions(n_shots: int, drop_cut: int | None, share: float = 0.45) -> dict[str, str]:
     """Pick which cut points get a transition and which look. Deterministic and varied."""
     cuts = n_shots - 1
@@ -124,12 +166,12 @@ def auto_transitions(n_shots: int, drop_cut: int | None, share: float = 0.45) ->
 def plan(clips: list[dict], beats: dict, *, name: str = "video", music: str | None = None, preset: str = "reels-9x16",
          duration: float | None = None, intro_shots: int = 2, body_start: float | None = None,
          period: float | None = None, grade: str = "warm-desert", transitions: bool = True,
-         align_bars: bool = False) -> dict:
+         align_bars: bool = False, pacing: str | None = None) -> dict:
     duration = float(duration or beats["duration"])
     period = float(period or beats["period"])
     phase_t = beats["t0"]
     t0 = body_start_time(beats, duration, period, intro_shots, body_start, align_bars)
-    lay = layout(duration, t0, period, intro_shots)
+    lay = layout_paced(beats, duration, t0, period, intro_shots) if pacing == "energy" else layout(duration, t0, period, intro_shots)
     if len(clips) != lay["shots"]:
         raise vl.EngineError(
             f"this music needs {lay['shots']} clips ({intro_shots} intro + {lay['last_beat']} body + 1 outro) "

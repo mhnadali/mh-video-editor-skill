@@ -283,6 +283,62 @@ def validate(on: list[float], low: list[float], period: float, phase: float, bea
             "ok": not notes}
 
 
+def beat_strengths(onset: list[float], beats: list[float]) -> list[float]:
+    """Onset strength at each beat (0-1), so the planner can hold calm beats and cut fast on strong ones (pacing)."""
+    out = []
+    for t in beats:
+        i = int(round(t / FRAME))
+        window = onset[max(0, i - 1):i + 2] or [0.0]
+        out.append(max(window))
+    mx = max(out) or 1.0
+    return [round(v / mx, 3) for v in out]
+
+
+def detect_sections(full: list[float], beats: list[float], period: float) -> list[dict]:
+    """Segment the track into musical sections (intro / build / drop / outro) by sustained loudness level.
+
+    For each beat, take the mean full-band energy over the following beat; smooth it; start a new section when the
+    level departs from the current section's running mean by a clear margin for at least a few beats. Sections are then
+    labelled by energy relative to the loudest and by position (first calm = intro, last calm = outro, loudest = drop).
+    Editors put the biggest picture change on the biggest musical boundary, so story beats align to these.
+    """
+    if len(beats) < 4:
+        return []
+    step = int(round(period / FRAME)) or 1
+    e = []
+    for t in beats:
+        i = int(round(t / FRAME))
+        seg = full[i:i + step] or [0.0]
+        e.append(sum(seg) / len(seg))
+    mx = max(e) or 1.0
+    e = [v / mx for v in e]
+    sm = _smooth(e, 3)
+    bounds = [0]
+    mean, cnt = sm[0], 1
+    for k in range(1, len(sm)):
+        if abs(sm[k] - mean) > 0.18 and (k - bounds[-1]) >= 3:
+            bounds.append(k)
+            mean, cnt = sm[k], 1
+        else:
+            mean = (mean * cnt + sm[k]) / (cnt + 1)
+            cnt += 1
+    bounds.append(len(sm))
+    secs = []
+    for a, b in zip(bounds, bounds[1:]):
+        lvl = sum(sm[a:b]) / max(b - a, 1)
+        secs.append({"start_beat": a, "end_beat": b, "start": round(beats[a], 3),
+                     "end": round(beats[min(b, len(beats)) - 1], 3), "energy": round(lvl, 3), "label": "build"})
+    hi = max((s["energy"] for s in secs), default=0.0) or 1.0
+    for idx, s in enumerate(secs):
+        if idx == 0 and s["energy"] <= 0.6 * hi:
+            s["label"] = "intro"
+        elif idx == len(secs) - 1 and s["energy"] <= 0.7 * hi:
+            s["label"] = "outro"
+        elif s["energy"] >= 0.85 * hi:
+            s["label"] = "drop"
+    return secs
+
+
 def analyse(path: str | os.PathLike, max_seconds: float | None = None, bpm_range=(70.0, 180.0),
             bpm: float | None = None, beats_per_bar: int = 4, first_beat: float | None = None) -> dict:
     pcm = decode_pcm(path, max_seconds)
@@ -342,12 +398,14 @@ def analyse(path: str | os.PathLike, max_seconds: float | None = None, bpm_range
     bp = check["bar_phase"]
     if forced_note:
         check["notes"].insert(0, forced_note)
+    strengths = beat_strengths(on, beat_times)
+    secs = detect_sections(full, beat_times, period)
     return {
         "file": vl.ffp(path), "duration": round(duration, 3), "bpm": round(60 / period, 2),
         "period": round(period, 4), "phase": round(phase, 3), "t0": round(t0, 3),
         "confidence": round(confidence, 2), "alternatives": alts, "beats_per_bar": beats_per_bar,
         "drop": sections["drop"], "drop_beat": sections["drop_beat"], "drop_ratio": sections["drop_ratio"],
-        "beats": beat_times,
+        "beats": beat_times, "beat_strength": strengths, "sections": secs,
         "bar_phase": bp, "downbeats": [t for k, t in enumerate(beat_times) if k % beats_per_bar == bp],
         "validation": check,
         "note": "Grid fitted to onsets; verify with `plan` output or by ear. If BPM looks doubled/halved, "

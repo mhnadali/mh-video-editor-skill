@@ -1,6 +1,6 @@
 # M.H. Video Editor Skill
 
-![Version](https://img.shields.io/badge/version-0.6.0-blue)
+![Version](https://img.shields.io/badge/version-0.7.0-blue)
 ![Claude Code](https://img.shields.io/badge/Claude%20Code-skill%20%2B%20agent-orange)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
@@ -67,6 +67,7 @@ python engine/scripts/mh_video.py qa work/trip.mp4 --edl work/video.edl.json --s
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | Modules, timing model, per-shot filter chain, roadmap |
 | [`references/`](references/) | EDL format, colour, motion, text, formats, sound design, delivery, QA gate, pitfalls, effect budget |
 | [`references/delivery.md`](references/delivery.md) | Delivery presets, size/bitrate targeting, manifest, bundle |
+| [`references/editorial-rubric.md`](references/editorial-rubric.md) | The craft of the cut: priorities, shot grammar, pacing, music structure |
 | [`docs/ROADMAP.md`](docs/ROADMAP.md) | State, the MP4 export / size-reduction layer with research and measurements, the post-0.5 roadmap, hand-off notes |
 | [`SUPPORT.md`](SUPPORT.md) | Platform / FFmpeg support matrix and how to get help |
 | [`docs/QA-PROTOCOL.md`](docs/QA-PROTOCOL.md) | Real-footage manual QA checklist |
@@ -102,11 +103,11 @@ python run_tests.py -k color --durations 10
 python coverage_report.py        # line coverage, standard library only (Python 3.12+)
 python -m unittest discover -p "test_*.py"   # plain unittest works too
 ```
-530 tests (96 % line coverage of the engine, measured with `coverage_report.py`). The end-to-end ones generate their own clips and music with FFmpeg (no footage needed); without FFmpeg they skip. They include a mutation fuzzer for malformed EDLs, a check that every filter the renderer uses is covered by `doctor`/`lint`, concurrency tests for the shared caches, a static Python 3.9 compatibility check, a no-network security invariant, delivery/size-targeting and reproducibility tests, and a test that the generated CLI reference is current. A GitHub Actions workflow (`.github/workflows/mh-video-editor-skill.yml`) runs the suite on Linux and Windows; macOS is validated with the manual QA protocol ([`docs/QA-PROTOCOL.md`](docs/QA-PROTOCOL.md)).
+542 tests (96 % line coverage of the engine, measured with `coverage_report.py`). The end-to-end ones generate their own clips and music with FFmpeg (no footage needed); without FFmpeg they skip. They include a mutation fuzzer for malformed EDLs, a check that every filter the renderer uses is covered by `doctor`/`lint`, concurrency tests for the shared caches, a static Python 3.9 compatibility check, a no-network security invariant, delivery/size-targeting and reproducibility tests, and a test that the generated CLI reference is current. A GitHub Actions workflow (`.github/workflows/mh-video-editor-skill.yml`) runs the suite on Linux and Windows; macOS is validated with the manual QA protocol ([`docs/QA-PROTOCOL.md`](docs/QA-PROTOCOL.md)).
 
 ## Status
 
-Version 0.6.0 completes the original five-phase plan (foundation, speed and accuracy, quality gate, new capabilities, hardening and documentation) and the first post-0.5 arc: cross-environment trust, onboarding, a delivery/export layer, editing-quality tooling, broader hardware support, and reproducibility (see [`docs/ROADMAP.md`](docs/ROADMAP.md)). Developed on Windows with FFmpeg 9.0.2 and validated on synthetic media and the author's own footage; CI runs the full render suite on Linux and Windows, and the engine is now exercised on FFmpeg 6.x as well. Not for AI video generation or heavy compositing.
+Version 0.7.0 completes the original five-phase plan (foundation, speed and accuracy, quality gate, new capabilities, hardening and documentation), the first post-0.5 arc (cross-environment trust, onboarding, delivery/export, broader hardware, reproducibility), and a professional-editing arc (tracks A-G: editorial measurement and lint, energy-aware pacing, musical sections, skin-tone colour, subject-aware reframing, a craft rubric) \u2014 the engine measures, the agent judges (see [`docs/ROADMAP.md`](docs/ROADMAP.md) and [`references/editorial-rubric.md`](references/editorial-rubric.md)). Developed on Windows with FFmpeg 9.0.2 and validated on synthetic media and the author's own footage; CI runs the full render suite on Linux and Windows, and the engine is now exercised on FFmpeg 6.x as well. Not for AI video generation or heavy compositing.
 
 ## License
 MIT, see [`LICENSE`](LICENSE) and [`NOTICE.md`](NOTICE.md). FFmpeg is installed separately.

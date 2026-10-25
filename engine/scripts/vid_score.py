@@ -16,6 +16,7 @@ import tempfile
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
+import vid_editorial
 import vid_sheets
 import vidlib as vl
 
@@ -138,13 +139,16 @@ def score_clip(rec: dict, hw: bool = False) -> dict:
         return {"index": rec["index"], "error": "could not measure any window"}
     best = max(wins, key=lambda w: (w["quality"], w["motion"]))
     mid = best["start"] + WINDOW / 2
-    return {"index": rec["index"], "path": rec["path"], "name": rec["name"], "size": rec.get("size"),
-            "mtime": rec.get("mtime"), "quality": best["quality"],
-            "best_start": best["start"],
-            "brightness": round(best["brightness"], 1), "contrast": round(best["contrast"], 1),
-            "saturation": round(best["saturation"], 1), "blur": round(best["blur"], 2),
-            "motion": round(best["motion"], 2), "flags": flags(best), "windows": len(wins),
-            "hash": dhash(rec["path"], mid, bool(rec.get("hdr")))}
+    out = {"index": rec["index"], "path": rec["path"], "name": rec["name"], "size": rec.get("size"),
+           "mtime": rec.get("mtime"), "quality": best["quality"],
+           "best_start": best["start"],
+           "brightness": round(best["brightness"], 1), "contrast": round(best["contrast"], 1),
+           "saturation": round(best["saturation"], 1), "blur": round(best["blur"], 2),
+           "motion": round(best["motion"], 2), "flags": flags(best), "windows": len(wins),
+           "hash": dhash(rec["path"], mid, bool(rec.get("hdr")))}
+    # editorial measurements (shot size, camera motion direction, saliency centroid) for the 'why' of the cut
+    out.update(vid_editorial.measure_shot(rec["path"], best["start"], WINDOW, bool(rec.get("hdr"))))
+    return out
 
 
 def percentile_rank(values: list[float]) -> list[float]:

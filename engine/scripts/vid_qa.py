@@ -21,6 +21,7 @@ import tempfile
 from pathlib import Path
 
 import vid_edl as ve
+import vid_editorial
 import vid_sheets
 import vidlib as vl
 
@@ -452,6 +453,18 @@ def audit_edit(edl: dict, scores: dict | None = None) -> tuple[list[dict], dict]
             if adj:
                 out.append({"id": "similar-neighbours", "level": "warn", "msg": f"{len(adj)} neighbouring shots show the same scene (shots {', '.join(str(i - 1) + '-' + str(i) for i in adj[:6])})"})
             out.append({"id": "clip-quality", "level": "info", "msg": f"mean quality of used clips {audit['mean_quality_used']} (library {audit['mean_quality_library']})"})
+        # editorial audit (Track A/F): shot-size variety, jump cuts, screen direction, pacing
+        feats = []
+        for sh in edl["shots"]:
+            key = os.path.normcase(os.path.abspath(sh["clip"]))
+            feats.append(next((s for s in scores.values() if s.get("path") and os.path.normcase(os.path.abspath(s["path"])) == key), {}))
+        if any(f.get("shot_size") for f in feats):
+            out += vid_editorial.editorial_issues(edl, feats, bounds, trans)
+            ed = vid_editorial.summarize_editorial(edl, feats, bounds, trans)
+            audit.update(ed)
+            out.append({"id": "editorial", "level": "info",
+                        "msg": f"shot sizes {ed['shot_size_mix']}, {ed['distinct_shot_sizes']} distinct; "
+                               f"{ed['cut_on_motion_share']:.0%} of hard cuts land on motion"})
     return out, audit
 
 

@@ -138,7 +138,7 @@ mh_video beats [-h] [--out OUT] [--max-seconds MAX_SECONDS] [--bpm BPM] [--beats
 How many clips a beat grid needs.
 
 ```
-mh_video need [-h] [--duration DURATION] [--period PERIOD] [--intro-shots INTRO_SHOTS] beats
+mh_video need [-h] [--duration DURATION] [--period PERIOD] [--intro-shots INTRO_SHOTS] [--pacing {beat,energy}] beats
 ```
 
 | Argument | Required / default | Meaning |
@@ -147,13 +147,14 @@ mh_video need [-h] [--duration DURATION] [--period PERIOD] [--intro-shots INTRO_
 | `--duration DURATION` |  | override the video duration in seconds |
 | `--period PERIOD` |  | override the beat period in seconds |
 | `--intro-shots INTRO_SHOTS` | default `2` | shots before the beat grid starts |
+| `--pacing PACING` | one of `beat`, `energy` | energy = hold calm beats, cut fast on strong ones (Track B) |
 
 ## `plan`
 
 Beat grid + ordered clip list -> EDL.
 
 ```
-mh_video plan [-h] --beats BEATS --clips CLIPS --out OUT [--name NAME] [--music MUSIC] [--preset PRESET] [--duration DURATION] [--period PERIOD] [--intro-shots INTRO_SHOTS] [--grade GRADE] [--no-transitions] [--bar-align] [--scores SCORES]
+mh_video plan [-h] --beats BEATS --clips CLIPS --out OUT [--name NAME] [--music MUSIC] [--preset PRESET] [--duration DURATION] [--period PERIOD] [--intro-shots INTRO_SHOTS] [--grade GRADE] [--no-transitions] [--bar-align] [--pacing {beat,energy}] [--scores SCORES]
 ```
 
 | Argument | Required / default | Meaning |
@@ -170,6 +171,7 @@ mh_video plan [-h] --beats BEATS --clips CLIPS --out OUT [--name NAME] [--music 
 | `--grade GRADE` | default `warm-desert` | look or preset name |
 | `--no-transitions` |  | hard cuts only |
 | `--bar-align` |  | start the body on a downbeat (needs bar_phase in beats.json) |
+| `--pacing PACING` | one of `beat`, `energy` | energy = hold calm beats, cut fast on strong ones (Track B) |
 | `--scores SCORES` |  | work folder containing scores.json: fill src_start from each clip's best window |
 
 ## `lint`
@@ -310,7 +312,7 @@ mh_video color analyze [-h] [--at AT] [--strength STRENGTH] [--scope SCOPE] sour
 Propose per-shot corrections for an EDL (dry run unless --write).
 
 ```
-mh_video color plan [-h] [--match {exposure,reference,none}] [--reference REFERENCE] [--strength STRENGTH] [--wb {off,median,gray-world}] [--only ONLY] [--write] [--overwrite] edl
+mh_video color plan [-h] [--match {exposure,reference,none}] [--reference REFERENCE] [--strength STRENGTH] [--wb {off,median,gray-world,skin}] [--only ONLY] [--write] [--overwrite] edl
 ```
 
 | Argument | Required / default | Meaning |
@@ -319,7 +321,7 @@ mh_video color plan [-h] [--match {exposure,reference,none}] [--reference REFERE
 | `--match MATCH` | default `exposure`; one of `exposure`, `reference`, `none` | how shots are matched to each other |
 | `--reference REFERENCE` |  | shot number to match (with --match reference) |
 | `--strength STRENGTH` | default `0.8` | how strongly the look is applied, 0-1 |
-| `--wb WB` | one of `off`, `median`, `gray-world` | white balance: median (default with --match exposure), gray-world (opt-in), off |
+| `--wb WB` | one of `off`, `median`, `gray-world`, `skin` | white balance: median (default with --match exposure), gray-world (opt-in), skin (protects warmth), off |
 | `--only ONLY` |  | shot numbers, e.g. 0-5,9 |
 | `--write` |  | store the proposal in the EDL (otherwise only print it) |
 | `--overwrite` |  | replace corrections that are already in the EDL |

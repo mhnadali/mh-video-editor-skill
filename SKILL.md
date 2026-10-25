@@ -113,6 +113,7 @@ Delegate to `mh-video-editor` (`agents/mh-video-editor.md`) only after the brief
 | `references/formats.md` | 9:16 / 16:9 / 1:1, reframing |
 | `references/sound-design.md` | Whooshes, ducking, ambient sound, mastering |
 | `references/delivery.md` | Delivery presets, size/bitrate targeting, render manifest and project bundle |
+| `references/editorial-rubric.md` | The craft of the cut: priorities, shot grammar, pacing, music structure (the agent's decision framework) |
 | `engine/scripts/` | The CLI and modules |
 | `engine/presets/` | Output sizes and colour grades |
 | `engine/tests/` | 510+ tests on synthetic media (`python run_tests.py [--fast]` inside `engine/tests`) |

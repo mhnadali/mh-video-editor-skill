@@ -34,8 +34,10 @@ Exit code 0 = PASS or PASS WITH WARNINGS, 1 = FAIL (`--strict`: 1 on warnings to
 | content | info | summary of looks, corrections, speed changes, stabilised shots, texts, sound design | what the EDL asked for |
 | beat-alignment | warn | fewer than 90% of cuts within 1.5 frames of a beat | cuts that ignore the music |
 | weak-clips, similar-neighbours | warn | clips flagged dark/overexposed/blurry, or two neighbouring shots of the same scene (needs `--scores`) | phase 2 scoring |
+| editorial | info | shot-size mix, distinct shot sizes, and the share of hard cuts that land on motion (needs `--scores` with editorial measurements) | the craft of the cut (Track A) |
+| shot-size-repeat, jump-cut, screen-direction, pacing-flat | warn / info | three same-size shots in a row, a hard cut between look-alike same-size shots, camera-direction reversal across a cut, or shot lengths that barely vary | editorial warnings from the measured features (Track A) |
 
-Info lines (`chroma-balance`, `luma-range`, `clip-quality`) are context, never failures.
+Info lines (`chroma-balance`, `luma-range`, `clip-quality`, `editorial`) are context, never failures.
 
 ## How to read a report
 1. FAIL: fix the cause (EDL or engine), re-render, run the gate again. Do not hand over a FAIL.

@@ -203,6 +203,8 @@ def _reframe(pl: dict) -> list[str]:
     W, H = pl["W"], pl["H"]
     mode = pl.get("reframe") or "cover"
     focus = pl.get("focus")
+    if not (isinstance(focus, (list, tuple)) and len(focus) == 2):
+        focus = None                                  # "auto" is resolved before this in render_part; ignore anything else
     if mode == "fit":
         return [f"scale={W}:{H}:force_original_aspect_ratio=decrease,pad={W}:{H}:(ow-iw)/2:(oh-ih)/2:color=black"]
     if mode == "blur-fill":
@@ -338,6 +340,10 @@ def render_part(edl: dict, j: int, bounds: list[int], trans: dict[int, str], sca
     win = shot_window(pl, info)
     st = win["start"]
     hdr = bool(info.get("hdr"))
+    if pl.get("focus") == "auto":                      # Track E: keep the subject in frame when reframing
+        import vid_editorial
+        frames = vid_editorial.gray_frames(pl["clip"], win["start0"], min(max(win["out_seconds"], 0.3), 2.0), hdr=hdr)
+        pl["focus"] = list(vid_editorial.saliency_centroid(frames)) if frames else None
     src_fps = info.get("fps") or 30.0
     hw = hwdecode_args(hwdecode)
     ff = vl.find_ffmpeg()["ffmpeg"]

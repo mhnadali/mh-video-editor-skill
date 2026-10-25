@@ -2,6 +2,21 @@
 
 All notable changes to this project. Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [SemVer](https://semver.org/).
 
+## [0.7.0] - 2026-10-25 (tracks A-G: editorial intelligence, music structure, colour, reframing)
+### Added
+- **Editorial measurement (Track A, `vid_editorial.py`):** per-shot shot-size classification (wide/medium/close), camera-motion direction and magnitude (block matching on small grayscale frames), and a saliency centroid - pure Python over FFmpeg-decoded frames, no ML. `score` now stores these as cached fields.
+- **Editorial lint + QA (Tracks A/F):** the QA gate (with `--scores`) now reports an `editorial` summary (shot-size mix, cut-on-motion share) and warns on `shot-size-repeat`, `jump-cut`, `screen-direction` (180-degree line) and `pacing-flat`.
+- **Story structure / pacing (Track B):** `plan --pacing energy` and `need --pacing energy` hold calm beats and cut fast on strong ones (energy-aware shot lengths) instead of one-shot-per-beat.
+- **Music structure (Track C):** `beats` now reports per-beat strength and musical `sections` (intro/build/drop/outro) from a sustained-loudness segmentation; `beats --bpm/--first-beat/--beats-per-bar` already added in 0.6. A music-selection tool (`engine/tools/pick_music.py`) ranks the user's own track library by fit to a brief (never downloads).
+- **Colour (Track D):** `color plan --wb skin` - skin-tone-aware white balance that neutralises a cast but never cools the image, protecting warm skin.
+- **Auto-reframe (Track E):** `focus: "auto"` on a shot keeps the subject in frame when reframing to another aspect, using the measured saliency centroid instead of a blind centre-crop.
+- **The craft rubric (Track G):** `references/editorial-rubric.md` - the agent's decision framework (Murch's priorities, shot grammar, pacing, music structure, correct-then-grade). Architecture notes the engine-measures / agent-judges split and the honest ML boundary.
+- Tests: `engine/tests/test_editorial.py` (measurement, editorial lint, sections, pacing, skin WB, music selection, auto-reframe).
+
+### Changed
+- `score.json` entries gain editorial fields (shot_size, motion_dx/dy/mag, focus_x/y); older entries are re-measured on the next `score`.
+- All new behaviour is opt-in via a flag or an EDL field; the default pipeline is unchanged.
+
 ## [0.6.0] - 2026-10-25 (phases 6-12: trust, onboarding, delivery, intelligence, reproducibility)
 ### Added
 - **Delivery and export layer** (`vid_deliver.py`, `references/delivery.md`): `render --delivery reels|tiktok|shorts|stories|youtube|square` sets the format, the -14 LUFS loudness target and the container (`yuv420p`, `+faststart`); `--target-size-mb N` targets a file size with two-pass libx264 (VBR on hardware encoders), treated as an upper bound; `--bitrate KBPS` sets the video bitrate directly. A `delivery_check` (size, aspect, container) is added to the render result.

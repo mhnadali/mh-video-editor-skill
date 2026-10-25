@@ -598,10 +598,15 @@ def propose_correction(stats: dict, strength: float = 0.8, target_mean: float | 
             full, why = [(g / r) * (mr / mg), 1.0, (g / b) * (mb / mg)], "towards the median colour balance of all shots"
         elif wb == "gray-world":
             full, limit, strength_wb, why = [g / r, 1.0, g / b], 0.15, 0.5, "gray-world (assumes the average colour is neutral)"
+        elif wb == "skin":
+            # skin-tone aware: neutralise a cast but never cool the image below neutral, so warm skin stays warm
+            full, limit, strength_wb, why = [g / r, 1.0, g / b], 0.12, 0.5, "skin-tone protected (warms only, never cools)"
         if full:
             cast = max(abs(full[0] - 1.0), abs(full[2] - 1.0))
             if cast > 0.03:
                 gain = [clamp(1.0 + strength_wb * strength * (x - 1.0), 1.0 - limit, 1.0 + limit) for x in full]
+                if wb == "skin":
+                    gain = [max(gain[0], 1.0), gain[1], min(gain[2], 1.0)]   # protect warmth: allow warming, block cooling
                 reasons.append(f"white balance gains R {gain[0]:.2f} / B {gain[2]:.2f} ({why}, difference {cast:.0%})")
     corr = {"ev": round(ev, 3), "black": round(black, 3), "white": round(white, 3), "gamma": 1.0,
             "gain": [round(x, 3) for x in gain]}

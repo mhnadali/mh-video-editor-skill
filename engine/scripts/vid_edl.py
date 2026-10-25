@@ -496,8 +496,8 @@ def _phase4_issues(edl: dict, style: dict, shots: list[dict]) -> list[dict]:
         if shot.get("reframe") is not None and shot["reframe"] not in REFRAME_MODES:
             add("error", "reframe", f"shot {j}: reframe '{shot['reframe']}' is unknown ({', '.join(REFRAME_MODES)})")
         f = shot.get("focus")
-        if f is not None and not (isinstance(f, list) and len(f) == 2 and all(isinstance(v, (int, float)) and 0 <= v <= 1 for v in f)):
-            add("error", "focus", f"shot {j}: focus must be [x, y] with both between 0 and 1")
+        if f is not None and f != "auto" and not (isinstance(f, list) and len(f) == 2 and all(isinstance(v, (int, float)) and 0 <= v <= 1 for v in f)):
+            add("error", "focus", f"shot {j}: focus must be [x, y] with both between 0 and 1, or \"auto\"")
     try:
         import vid_text
         out += vid_text.validate(edl)

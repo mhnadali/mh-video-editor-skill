@@ -5,10 +5,32 @@ behind the MP4 export / size-reduction layer, and hand-off notes for continuing 
 
 ## State
 
-Version **0.6.0**. The original five-phase plan (foundation; speed and accuracy; the automated QA gate; new
-capabilities; hardening, documentation and CI) is complete, and the first post-v0.5 arc has landed: cross-environment
-trust, onboarding, a delivery/export layer, editing-quality tooling, more capabilities, broader hardware support, and
-reproducibility. The engine is standard-library Python over FFmpeg, with 500+ tests on synthetic media.
+Version **0.7.0**. The original five-phase plan (foundation; speed and accuracy; the automated QA gate; new
+capabilities; hardening, documentation and CI) is complete, the first post-v0.5 arc landed in 0.6.0 (cross-environment
+trust, onboarding, a delivery/export layer, editing-quality tooling, broader hardware support, reproducibility), and a
+professional-editing arc landed in 0.7.0 (tracks A-G below). The engine is standard-library Python over FFmpeg, with
+540+ tests on synthetic media.
+
+## Professional-editing arc (0.7.0, tracks A-G)
+
+The guiding idea is **the engine measures, the agent judges** (see `references/editorial-rubric.md`). Implemented:
+
+- **A - the science of the cut:** `vid_editorial.py` measures shot size, camera-motion direction, and a saliency
+  centroid; the QA gate warns on jump cuts, repeated shot sizes, screen-direction reversals and flat pacing.
+- **B - video with a purpose:** `plan --pacing energy` / `need --pacing energy` make shot length follow the music's
+  energy instead of a mechanical one-shot-per-beat.
+- **C - music structure & selection:** `beats` reports per-beat strength and musical sections (intro/build/drop/outro);
+  `engine/tools/pick_music.py` ranks the user's own library by fit to a brief (never downloads).
+- **D - colour:** `color plan --wb skin` protects warm skin tones (neutralises a cast, never cools).
+- **E - framing:** `focus: "auto"` keeps the subject in frame when reframing to another aspect.
+- **F - the flawless gate:** the editorial, sync and colour checks fold into the QA gate with `--scores`.
+- **G - architecture & the ML boundary:** documented in `docs/ARCHITECTURE.md`; perception stays heuristic to keep the
+  zero-dependency promise.
+
+Next within this arc: combine more scoring cues; sample-accurate onset refinement and a full tempo map; shot-to-shot
+colour matching across a sequence; a single quality score in the gate.
+
+## State (prior arc)
 
 See [`CHANGELOG.md`](../CHANGELOG.md) for what changed in each version and [`SUPPORT.md`](../SUPPORT.md) for the
 platform / FFmpeg support matrix.
