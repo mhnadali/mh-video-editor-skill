@@ -77,9 +77,7 @@ jobs:
         run: |
           $fake = Join-Path $env:RUNNER_TEMP "fakehome"
           New-Item -ItemType Directory -Force $fake | Out-Null
-          # install.ps1 installs under $HOME, which PowerShell fixes at session start and does NOT update when
-          # $env:USERPROFILE changes, so override $HOME (and USERPROFILE) to the same fake home before and when checking.
-          $HOME = $fake
+          # install.ps1 installs under $env:USERPROFILE; set only that (assigning the read-only $HOME throws).
           $env:USERPROFILE = $fake
           & .\install.ps1
           $global:LASTEXITCODE = 0
