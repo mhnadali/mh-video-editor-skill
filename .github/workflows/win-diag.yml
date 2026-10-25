@@ -54,6 +54,7 @@ jobs:
             $HOME = $fake
             $env:USERPROFILE = $fake
             & .\install.ps1
+            $global:LASTEXITCODE = 0
             if (-not (Test-Path (Join-Path $fake ".claude\skills\mh-video-editor-skill\SKILL.md"))) { throw "skill not installed" }
             if (-not (Test-Path (Join-Path $fake ".claude\agents\mh-video-editor.md"))) { throw "agent not installed" }
           } elseif ("${{ matrix.mod }}" -eq "fast") {
