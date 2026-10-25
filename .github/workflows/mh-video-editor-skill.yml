@@ -44,7 +44,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        os: [ubuntu-latest, windows-latest]
         python: ["3.12"]
     steps:
       - uses: actions/checkout@v4
@@ -59,17 +59,6 @@ jobs:
       - name: Install FFmpeg (Windows)
         if: runner.os == 'Windows'
         run: choco install ffmpeg --no-progress -y
-      - name: Install FFmpeg (macOS)
-        if: runner.os == 'macOS'
-        uses: federico-carboni/setup-ffmpeg@v3
-      - name: Installer smoke test (macOS)
-        if: runner.os == 'macOS'
-        run: |
-          export HOME="$RUNNER_TEMP/fakehome"
-          mkdir -p "$HOME"
-          bash install.sh
-          test -f "$HOME/.claude/skills/mh-video-editor-skill/SKILL.md"
-          test -f "$HOME/.claude/agents/mh-video-editor.md"
       - name: Doctor
         run: python engine/scripts/mh_video.py doctor
       - name: Full test suite

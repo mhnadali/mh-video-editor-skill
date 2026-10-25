@@ -6,8 +6,11 @@ New-Item -ItemType Directory -Force (Join-Path $HOME ".claude\skills"), (Join-Pa
 $same = (Test-Path $dest) -and ((Resolve-Path $src).Path -eq (Resolve-Path $dest).Path)
 if (-not $same) {
   if (Test-Path $dest) { Remove-Item $dest -Recurse -Force }
-  Copy-Item $src $dest -Recurse -Force
-  Remove-Item (Join-Path $dest ".git") -Recurse -Force -ErrorAction SilentlyContinue
+  New-Item -ItemType Directory -Force $dest | Out-Null
+  # copy everything except .git (copying the git directory is slow and can hit Windows' long-path limit)
+  Get-ChildItem -LiteralPath $src -Force | Where-Object { $_.Name -ne ".git" } | ForEach-Object {
+    Copy-Item -LiteralPath $_.FullName -Destination $dest -Recurse -Force
+  }
 }
 Copy-Item (Join-Path $dest "agents\mh-video-editor.md") (Join-Path $HOME ".claude\agents\") -Force
 Write-Host "Installed to $dest. Checking FFmpeg ..."

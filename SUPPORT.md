@@ -13,7 +13,7 @@ Always run `python engine/scripts/mh_video.py doctor` first. It prints the FFmpe
 |---|---|---|
 | Python | 3.9 – 3.13 | Standard library only; 3.9 is exercised in CI, development is on 3.12+ |
 | FFmpeg | 6.x, 7.x, 9.x | Developed on 9.0.2; CI installs the distro build (6.x on Ubuntu). `doctor` reports missing optional filters |
-| OS | Linux, macOS, Windows | CI runs the full render suite on all three |
+| OS | Linux, macOS, Windows | CI runs the full render suite on Linux and Windows; macOS is validated with the manual QA protocol (`docs/QA-PROTOCOL.md`) |
 | Encoders | libx264 (always), NVENC, VideoToolbox, QSV | `--encoder auto` picks a working hardware encoder, else libx264. VAAPI is detected and reported; it is not auto-selected |
 | Decoders | software (always), CUDA (`--hwdecode auto`) | automatic software fallback if GPU decode fails |
 

@@ -39,9 +39,11 @@ that leaves less than 120 kbit/s for the picture is refused with a clear message
 
 ## Post-0.5 roadmap (phases 6–12)
 
-- **6 — Cross-environment trust.** CI now runs the full render suite on Linux, macOS and Windows; `doctor` reports the
-  working hardware encoders; a robustness fix handles FFmpeg builds (6.x) that print `-nan` from `blurdetect`. Remaining:
-  a first green CI run observed on GitHub, branch protection, and an FFmpeg-version matrix in CI.
+- **6 — Cross-environment trust.** CI runs the full render suite on Linux and Windows; `doctor` reports the working
+  hardware encoders; a robustness fix handles FFmpeg builds (6.x) that print `-nan` from `blurdetect`. macOS is covered
+  by the manual QA protocol rather than CI: the GitHub macOS runner's Homebrew ffmpeg install fails at setup, and the
+  repo's Actions policy blocks the third-party `setup-ffmpeg` action. Remaining: a first green CI run observed on GitHub,
+  branch protection, an FFmpeg-version matrix in CI, and a workable macOS CI ffmpeg source.
 - **7 — Onboarding & distribution.** A zero-footage sample project (`engine/tools/make_sample.py`), a quickstart in the
   README, and a tag-driven release workflow. Remaining: the first tagged GitHub Release.
 - **8 — Export & delivery.** Done (above).
