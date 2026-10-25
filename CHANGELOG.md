@@ -12,6 +12,9 @@ All notable changes to this project. Format: [Keep a Changelog](https://keepacha
 ### Changed
 - `beats.json` gains `tempo_map`, `beats_refined`, `drop_refined`; `correct` accepts a `secondary` list; all additive and opt-in.
 
+### Fixed
+- **Windows CI (root cause).** The Windows installer smoke test set `$env:USERPROFILE` to a fake home, but `install.ps1` installed under PowerShell's `$HOME`, which is fixed at session start and does not follow a later `$env:USERPROFILE` change - so the install went to the real home while the check looked in the fake one, failing every run (Linux passed because `export HOME` does update bash). `install.ps1` now resolves the home from `$env:USERPROFILE` (falling back to `$HOME`), and the workflow overrides both consistently. Confirmed by reproducing the full suite locally on FFmpeg 6.1.1, 8.1.3 and 9.0.2 (all green), isolating the failure to the Windows-only step.
+
 ## [0.7.0] - 2026-10-25 (tracks A-G: editorial intelligence, music structure, colour, reframing)
 ### Added
 - **Editorial measurement (Track A, `vid_editorial.py`):** per-shot shot-size classification (wide/medium/close), camera-motion direction and magnitude (block matching on small grayscale frames), and a saliency centroid - pure Python over FFmpeg-decoded frames, no ML. `score` now stores these as cached fields.

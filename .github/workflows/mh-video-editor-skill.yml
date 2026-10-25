@@ -75,11 +75,15 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          $env:USERPROFILE = Join-Path $env:RUNNER_TEMP "fakehome"
-          New-Item -ItemType Directory -Force $env:USERPROFILE | Out-Null
+          $fake = Join-Path $env:RUNNER_TEMP "fakehome"
+          New-Item -ItemType Directory -Force $fake | Out-Null
+          # install.ps1 installs under $HOME, which PowerShell fixes at session start and does NOT update when
+          # $env:USERPROFILE changes, so override $HOME (and USERPROFILE) to the same fake home before and when checking.
+          $HOME = $fake
+          $env:USERPROFILE = $fake
           & .\install.ps1
-          if (-not (Test-Path (Join-Path $env:USERPROFILE ".claude\skills\mh-video-editor-skill\SKILL.md"))) { throw "skill not installed" }
-          if (-not (Test-Path (Join-Path $env:USERPROFILE ".claude\agents\mh-video-editor.md"))) { throw "agent not installed" }
+          if (-not (Test-Path (Join-Path $fake ".claude\skills\mh-video-editor-skill\SKILL.md"))) { throw "skill not installed" }
+          if (-not (Test-Path (Join-Path $fake ".claude\agents\mh-video-editor.md"))) { throw "agent not installed" }
 
   coverage:
     name: Line coverage
