@@ -1,7 +1,7 @@
 name: win-diag
 
-# Temporary Windows diagnostic: run each test module as its own job so the failing one is visible from the
-# check-run conclusions (the authoring session cannot read Actions logs). Removed once the Windows failure is fixed.
+# Temporary Windows diagnostic to pinpoint the install.ps1 smoke failure via per-job conclusions
+# (the authoring session cannot read Actions logs). Removed once Windows CI is green.
 
 on:
   push:
@@ -16,49 +16,40 @@ jobs:
   diag:
     name: win ${{ matrix.mod }}
     runs-on: windows-latest
-    timeout-minutes: 30
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
-        mod:
-          - smoke
-          - fast
-          - test_render
-          - test_phase4_integration
-          - test_transitions_audio
-          - test_formats
-          - test_deliver
-          - test_editorial
-          - test_qa
-          - test_color
-          - test_motion
-          - test_text
-          - test_sfx
-          - test_capabilities
-          - test_cli
-          - test_repo
+        mod: [smoke_doctor, smoke_run, smoke_files, smoke_full]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
       - name: Install FFmpeg
-        if: matrix.mod != 'test_cli' && matrix.mod != 'test_repo'
+        if: matrix.mod == 'smoke_doctor'
         run: choco install ffmpeg --no-progress -y
       - name: Run
         shell: pwsh
         run: |
-          if ("${{ matrix.mod }}" -eq "smoke") {
-            $fake = Join-Path $env:RUNNER_TEMP "fakehome"
-            New-Item -ItemType Directory -Force $fake | Out-Null
-            $HOME = $fake
-            $env:USERPROFILE = $fake
+          $fake = Join-Path $env:RUNNER_TEMP "fakehome"
+          New-Item -ItemType Directory -Force $fake | Out-Null
+          $HOME = $fake
+          $env:USERPROFILE = $fake
+          if ("${{ matrix.mod }}" -eq "smoke_doctor") {
+            & python engine/scripts/mh_video.py doctor
+            if ($LASTEXITCODE -ne 0) { throw "doctor exit $LASTEXITCODE" }
+          } elseif ("${{ matrix.mod }}" -eq "smoke_run") {
+            & .\install.ps1          # fails only if install.ps1 throws a terminating error
+            $global:LASTEXITCODE = 0
+          } elseif ("${{ matrix.mod }}" -eq "smoke_files") {
+            try { & .\install.ps1 } catch { Write-Host "install threw: $_" }
+            $global:LASTEXITCODE = 0
+            if (-not (Test-Path (Join-Path $fake ".claude\skills\mh-video-editor-skill\SKILL.md"))) { throw "SKILL.md missing" }
+            if (-not (Test-Path (Join-Path $fake ".claude\agents\mh-video-editor.md"))) { throw "agent missing" }
+          } else {
             & .\install.ps1
             $global:LASTEXITCODE = 0
             if (-not (Test-Path (Join-Path $fake ".claude\skills\mh-video-editor-skill\SKILL.md"))) { throw "skill not installed" }
             if (-not (Test-Path (Join-Path $fake ".claude\agents\mh-video-editor.md"))) { throw "agent not installed" }
-          } elseif ("${{ matrix.mod }}" -eq "fast") {
-            python engine/tests/run_tests.py --fast
-          } else {
-            python engine/tests/run_tests.py -k ${{ matrix.mod }}
           }
