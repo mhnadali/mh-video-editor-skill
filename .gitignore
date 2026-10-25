@@ -1,0 +1,5 @@
+__pycache__/
+*.pyc
+coverage.json
+*_work/
+*.qa.json

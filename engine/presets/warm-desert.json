@@ -1,0 +1,5 @@
+{
+  "name": "warm-desert",
+  "description": "Warm, contrasty, saturated sand tones with a light vignette. The grade of the approved Maranjab v4.",
+  "grade": "eq=contrast=1.14:saturation=1.30:gamma=0.95:brightness=0.01,colorbalance=rm=0.05:gm=0.0:bm=-0.06:rs=0.03:bs=-0.03:rh=0.04:bh=-0.05,unsharp=5:5:0.6:5:5:0.0,vignette=PI/7"
+}

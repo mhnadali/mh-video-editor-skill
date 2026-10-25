@@ -1,0 +1,327 @@
+"""Step 2a: beat grid, tempo candidates and song sections from an audio file.
+
+Pure Python (standard library): decode through FFmpeg to mono 16-bit PCM, build a two-band onset
+envelope, estimate tempo by autocorrelation, then fit an exact grid  t = t0 + period * k.
+The result is a *measurement*, not a guarantee: it reports confidence and the half/double-tempo
+alternatives so a human (or the agent) can confirm before cutting.
+"""
+from __future__ import annotations
+
+import array
+import math
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+import vidlib as vl
+
+SR = 11025          # analysis sample rate
+HOP = SR // 100     # 10 ms frames
+FRAME = 0.01
+
+
+def decode_pcm(path: str | os.PathLike, max_seconds: float | None = None) -> array.array:
+    cmd = [vl.find_ffmpeg()["ffmpeg"], "-v", "error", "-i", vl.ffp(path), "-vn", "-ac", "1", "-ar", str(SR)]
+    if max_seconds:
+        cmd += ["-t", str(max_seconds)]
+    cmd += ["-f", "s16le", "-"]
+    r = subprocess.run(cmd, capture_output=True)
+    if r.returncode != 0 or not r.stdout:
+        raise vl.EngineError(f"could not decode audio: {path}\n{r.stderr.decode(errors='replace')[-400:]}")
+    pcm = array.array("h")
+    pcm.frombytes(r.stdout[: len(r.stdout) // 2 * 2])
+    if sys.byteorder == "big":
+        pcm.byteswap()
+    return pcm
+
+
+def _bands(pcm: array.array) -> tuple[list[float], list[float], list[float]]:
+    """Per-10ms RMS of: low band (<150 Hz), the rest, and the full signal."""
+    a = math.exp(-2 * math.pi * 150 / SR)
+    lp = 0.0
+    low, high, full = [], [], []
+    sl = sh = sf = 0.0
+    n = 0
+    for x in pcm:
+        lp = (1 - a) * x + a * lp
+        h = x - lp
+        sl += lp * lp
+        sh += h * h
+        sf += x * x
+        n += 1
+        if n == HOP:
+            low.append(math.sqrt(sl / HOP))
+            high.append(math.sqrt(sh / HOP))
+            full.append(math.sqrt(sf / HOP))
+            sl = sh = sf = 0.0
+            n = 0
+    return low, high, full
+
+
+def _flux(e: list[float]) -> list[float]:
+    f = [0.0] * len(e)
+    for i in range(1, len(e)):
+        d = e[i] - e[i - 1]
+        f[i] = d if d > 0 else 0.0
+    return f
+
+
+def onset_strength(low: list[float], high: list[float]) -> list[float]:
+    fl, fh = _flux(low), _flux(high)
+    ml, mh = max(fl, default=0) or 1.0, max(fh, default=0) or 1.0
+    return [0.6 * l / ml + 0.4 * h / mh for l, h in zip(fl, fh)]
+
+
+def _autocorr_scores(on: list[float], bpm_lo: float, bpm_hi: float) -> list[tuple[float, int]]:
+    lag_lo, lag_hi = int(60 / bpm_hi / FRAME), int(60 / bpm_lo / FRAME)
+    n = len(on)
+    out = []
+    for lag in range(max(lag_lo, 5), min(lag_hi, n // 2) + 1):
+        c = 0.0
+        for i in range(n - lag):
+            c += on[i] * on[i + lag]
+        c /= (n - lag)
+        bpm = 60 / (lag * FRAME)
+        # gentle prior towards 100-140 BPM so that half/double tempo ties break sensibly
+        prior = math.exp(-0.5 * (math.log2(bpm / 120.0) / 0.6) ** 2)
+        out.append((c * (0.6 + 0.4 * prior), lag))
+    out.sort(reverse=True)
+    return out
+
+
+def _grid_score(on: list[float], period: float, offset: float) -> float:
+    n = len(on)
+    s = 0.0
+    k = 0
+    cnt = 0
+    while True:
+        t = offset + k * period
+        i = int(round(t / FRAME))
+        if i >= n - 1:
+            break
+        if i >= 1:
+            s += max(on[i - 1], on[i], on[i + 1])
+            cnt += 1
+        k += 1
+    return s / max(cnt, 1)
+
+
+def fit_grid(on: list[float], period0: float) -> tuple[float, float, float]:
+    """Refine period and phase around an initial estimate. Returns (period, phase, score)."""
+    best = (-1.0, period0, 0.0)
+    steps = 41
+    for si in range(steps):
+        period = period0 * (1 + (si - steps // 2) * 0.0008)
+        nph = max(1, int(period / 0.005))
+        for pi in range(nph):
+            ph = pi * 0.005
+            sc = _grid_score(on, period, ph)
+            if sc > best[0]:
+                best = (sc, period, ph)
+    return best[1], best[2], best[0]
+
+
+def _smooth(x: list[float], w: int) -> list[float]:
+    out, acc = [], 0.0
+    for i, v in enumerate(x):
+        acc += v
+        if i >= w:
+            acc -= x[i - w]
+        out.append(acc / min(i + 1, w))
+    return out
+
+
+def find_sections(full: list[float], period: float, t0: float, duration: float) -> dict:
+    """Find the biggest sustained loudness step (the 'drop') and snap it to the beat grid.
+
+    For every 0.1 s position the mean energy of the next 2 s is compared with the previous 2 s;
+    the position with the largest ratio is the step. Needs a ratio >= 1.25 to count.
+    """
+    blk = 10                                    # 10 frames of 10 ms = 0.1 s
+    e = [sum(full[i:i + blk]) / blk for i in range(0, len(full) - blk + 1, blk)]
+    w = 20                                      # 2 s
+    best, best_i = 1.0, None
+    peak = max(e, default=0.0)
+    start = next((i for i, v in enumerate(e) if v > 0.1 * peak), 0)      # where the music actually begins
+    for i in range(start + w, len(e) - w):                               # never mistake the song start for a drop
+        before = sum(e[i - w:i]) / w
+        after = sum(e[i:i + w]) / w
+        if before > 0 and after / before > best:
+            best, best_i = after / before, i
+    result = {"drop": None, "drop_beat": None, "drop_ratio": round(best, 2)}
+    if best_i is not None and best >= 1.25:
+        t = best_i * 0.1
+        # the step starts rising at t; the 'drop' is the first beat where the next second is (almost) at full level
+        def level(a: float) -> float:
+            i = int(a * 10)
+            return sum(e[i:i + 10]) / max(1, len(e[i:i + 10]))
+        ceil = max(level(t + d * 0.1) for d in range(0, 30))
+        k = max(0, math.ceil((t - t0) / period))
+        while t0 + k * period < t + 3 and level(t0 + k * period) < 0.9 * ceil:
+            k += 1
+        result.update(drop=round(t0 + k * period, 3), drop_beat=int(k))
+    return result
+
+
+
+# --------------------------------------------------------------------------- phase 2: validation
+
+def peak_times(on: list[float], min_gap: float = 0.1, rel: float = 0.3) -> list[float]:
+    """Times (s) of local maxima of the onset curve above rel * max, at least min_gap apart."""
+    top = max(on, default=0.0)
+    if top <= 0:
+        return []
+    gap = int(min_gap / FRAME)
+    peaks: list[int] = []
+    for i in range(2, len(on) - 2):
+        if on[i] >= rel * top and on[i] == max(on[max(0, i - 5):i + 6]):
+            if peaks and i - peaks[-1] < gap:
+                if on[i] > on[peaks[-1]]:
+                    peaks[-1] = i
+                continue
+            peaks.append(i)
+    return [i * FRAME for i in peaks]
+
+
+def ioi_tempo(peaks: list[float]) -> float | None:
+    """Independent tempo estimate (BPM): histogram of inter-onset intervals folded into one octave (0.35-0.9 s)."""
+    if len(peaks) < 6:
+        return None
+    hist: dict[int, float] = {}
+    for gap_n in (1, 2, 3):
+        for a, b in zip(peaks, peaks[gap_n:]):
+            d = (b - a) / gap_n
+            while d < 0.35:
+                d *= 2
+            while d > 0.9:
+                d /= 2
+            if 0.35 <= d <= 0.9:
+                k = int(round(d * 100))
+                for dk in (-1, 0, 1):                       # smooth: neighbours share weight
+                    hist[k + dk] = hist.get(k + dk, 0.0) + (1.0 if dk == 0 else 0.5)
+    if not hist:
+        return None
+    best = max(hist, key=lambda k: hist[k])
+    return 60.0 / (best / 100.0)
+
+
+def relation(bpm_a: float, bpm_b: float, tol: float = 0.04) -> str:
+    """How estimate B relates to estimate A: same, double (B = 2A), half (B = A/2) or different."""
+    for name, mult in (("same", 1.0), ("double", 2.0), ("half", 0.5)):
+        target = bpm_a * mult
+        if abs(bpm_b - target) / target <= tol:
+            return name
+    return "different"
+
+
+def stability(on: list[float], period: float, phase: float) -> dict:
+    """Fit the grid on each half of the track around the global period: tempo drift and median onset error."""
+    mid = len(on) // 2
+    half = {}
+    for name, seg, off in (("first", on[:mid], 0.0), ("second", on[mid:], mid * FRAME)):
+        best = (-1.0, period)
+        for si in range(-32, 33):                          # +-8% around the global period, 0.25% steps
+            p = period * (1 + si * 0.0025)
+            for pi in range(max(1, int(p / 0.01))):
+                sc = _grid_score(seg, p, pi * 0.01)
+                if sc > best[0]:
+                    best = (sc, p)
+        half[name] = best[1]
+    drift = abs(half["first"] - half["second"]) / period
+    pk = peak_times(on, rel=0.5)
+    sub = period / 4                                       # kicks, snares and hats all land on the 16th-note grid
+    res = sorted(abs(t - (phase + round((t - phase) / sub) * sub)) for t in pk)
+    resid = res[len(res) // 2] if res else 0.0             # median: a few fills do not matter
+    return {"period_first_half": round(half["first"], 4), "period_second_half": round(half["second"], 4),
+            "drift_pct": round(100 * drift, 2), "median_onset_error_ms": round(resid * 1000, 1)}
+
+
+def bar_phase(low: list[float], beats: list[float], beats_per_bar: int = 4) -> tuple[int, float]:
+    """Which beat of the bar is the 'one': the phase whose beats carry the most low-band (kick) energy.
+    Returns (phase 0..beats_per_bar-1 as an index into `beats`, confidence 0-1)."""
+    flux = _flux(low)
+    sums = [0.0] * beats_per_bar
+    counts = [0] * beats_per_bar
+    for k, t in enumerate(beats):
+        i = int(round(t / FRAME))
+        if 1 <= i < len(flux) - 2:
+            sums[k % beats_per_bar] += max(flux[i - 1:i + 3])
+            counts[k % beats_per_bar] += 1
+    means = [s / c if c else 0.0 for s, c in zip(sums, counts)]
+    total = sum(means)
+    if total <= 0:
+        return 0, 0.0
+    best = max(range(beats_per_bar), key=lambda p: means[p])
+    others = [m for p, m in enumerate(means) if p != best]
+    conf = (means[best] - (sum(others) / len(others))) / means[best] if means[best] > 0 else 0.0
+    return best, round(max(0.0, min(1.0, conf * 2)), 2)
+
+
+def validate(on: list[float], low: list[float], period: float, phase: float, beats: list[float]) -> dict:
+    """Second opinion on the grid. Everything here is advice for a human: warnings, never hard failures."""
+    notes: list[str] = []
+    pk = peak_times(on)
+    bpm = 60.0 / period
+    ioi = ioi_tempo(pk)
+    rel = relation(bpm, ioi) if ioi else None
+    if ioi is None:
+        notes.append("too few onsets for a second tempo estimate")
+    elif rel == "different":
+        notes.append(f"second estimate says {ioi:.1f} BPM, grid says {bpm:.1f}: confirm by ear before cutting")
+    elif rel in ("double", "half"):
+        notes.append(f"second estimate ({ioi:.1f} BPM) is the {rel} of the grid tempo ({bpm:.1f}): check which pulse you want to cut on")
+    st = stability(on, period, phase)
+    if st["drift_pct"] > 0.8:
+        notes.append(f"tempo drifts {st['drift_pct']}% between the first and second half: late cuts may slip off the beat")
+    if st["median_onset_error_ms"] > 35:
+        notes.append(f"strong onsets sit {st['median_onset_error_ms']} ms from the 16th-note grid (median): the track may be swung or live-played")
+    bp, bc = bar_phase(low, beats)
+    return {"second_tempo_bpm": round(ioi, 1) if ioi else None, "second_relation": rel, **st,
+            "bar_phase": bp, "bar_confidence": bc, "notes": notes,
+            "ok": not notes}
+
+
+def analyse(path: str | os.PathLike, max_seconds: float | None = None, bpm_range=(70.0, 180.0)) -> dict:
+    pcm = decode_pcm(path, max_seconds)
+    duration = len(pcm) / SR
+    if duration < 3:
+        raise vl.EngineError("audio shorter than 3 seconds: cannot estimate a beat grid")
+    low, high, full = _bands(pcm)
+    on = onset_strength(low, high)
+    scores = _autocorr_scores(on, *bpm_range)
+    if not scores:
+        raise vl.EngineError("no tempo candidates found (audio too short or silent)")
+    top_lag = scores[0][1]
+    period, phase, grid = fit_grid(on, top_lag * FRAME)
+    # alternatives: half and double tempo, scored on the same onset curve
+    alts = []
+    for mult in (0.5, 2.0):
+        p2 = period * mult
+        bpm2 = 60 / p2
+        if bpm_range[0] <= bpm2 <= bpm_range[1] + 40:
+            best = max(_grid_score(on, p2, (phase + i * period / 4) % p2) for i in range(4))
+            alts.append({"bpm": round(bpm2, 1), "period": round(p2, 4), "score": round(best, 3)})
+    mean_on = sum(on) / len(on) or 1e-9
+    confidence = min(1.0, max(0.0, (grid / mean_on - 1.0) / 4.0))
+    # first strong beat: first grid beat after the onset curve first exceeds 25% of its robust max
+    rob = sorted(on)[int(len(on) * 0.97)] or 1.0
+    start_i = next((i for i, v in enumerate(on) if v > 0.25 * rob), 0)
+    k0 = max(0, math.ceil((start_i * FRAME - phase - 0.5 * period) / period))
+    t0 = phase + k0 * period
+    sections = find_sections(full, period, t0, duration)
+    nbeats = int((duration - t0) / period) + 1
+    beat_times = [round(t0 + k * period, 3) for k in range(nbeats)]
+    check = validate(on, low, period, phase, beat_times)
+    bp = check["bar_phase"]
+    return {
+        "file": vl.ffp(path), "duration": round(duration, 3), "bpm": round(60 / period, 2),
+        "period": round(period, 4), "phase": round(phase, 3), "t0": round(t0, 3),
+        "confidence": round(confidence, 2), "alternatives": alts,
+        "drop": sections["drop"], "drop_beat": sections["drop_beat"], "drop_ratio": sections["drop_ratio"],
+        "beats": beat_times,
+        "bar_phase": bp, "downbeats": [t for k, t in enumerate(beat_times) if k % 4 == bp],
+        "validation": check,
+        "note": "Grid fitted to onsets; verify with `plan` output or by ear. If BPM looks doubled/halved, "
+                "pass the alternative period to `plan --period`.",
+    }

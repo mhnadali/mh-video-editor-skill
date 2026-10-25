@@ -1,0 +1,5 @@
+{
+  "name": "square-1x1",
+  "description": "Square feed video.",
+  "width": 1080, "height": 1080, "fps": 30
+}

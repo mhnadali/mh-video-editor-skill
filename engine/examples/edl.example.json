@@ -1,0 +1,24 @@
+{
+  "version": 1,
+  "project": {
+    "name": "example",
+    "preset": "reels-9x16",
+    "width": 1080, "height": 1920, "fps": 30,
+    "duration": 8.0,
+    "music": null
+  },
+  "beats": { "t0": 2.0, "period": 0.5, "drop_beat": 4 },
+  "style": { "grade": "neutral", "zoom": 0.05, "drop_flash": true, "end_flare": true },
+  "shots": [
+    { "clip": "footage/a.mp4", "span": [0.0, 1.0] },
+    { "clip": "footage/b.mp4", "span": [1.0, 2.0] },
+    { "clip": "footage/c.mp4", "span": [2.0, 2.5] },
+    { "clip": "footage/d.mp4", "span": [2.5, 3.0] },
+    { "clip": "footage/e.mp4", "span": [3.0, 3.5] },
+    { "clip": "footage/f.mp4", "span": [3.5, 4.0] },
+    { "clip": "footage/g.mp4", "span": [4.0, 5.0], "src_start": 6.0 },
+    { "clip": "footage/h.mp4", "span": [5.0, 6.0] },
+    { "clip": "footage/i.mp4", "span": [6.0, 8.0] }
+  ],
+  "transitions": { "1": "fade", "3": "circleopen", "8": "fade" }
+}

@@ -1,0 +1,5 @@
+{
+  "name": "neutral",
+  "description": "Light contrast and saturation lift, no colour cast. Safe default for any footage.",
+  "grade": "eq=contrast=1.06:saturation=1.10,unsharp=5:5:0.4:5:5:0.0"
+}

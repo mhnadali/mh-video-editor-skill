@@ -1,0 +1,3 @@
+# One clip per line; optional " @ seconds" picks where to start inside the clip.
+D:/Kavir1405/All Videos/2026_10_08_06_20_33_IMG_4876.MOV
+D:/Kavir1405/All Videos/DJI_20261008102733_0295_D.MP4 @ 4.5

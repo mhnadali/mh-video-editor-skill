@@ -1,0 +1,102 @@
+name: mh-video-editor-skill
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mh-video-editor-skill-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # No FFmpeg here: repository checks, documentation sync, the pure-Python tests and the oldest/newest Python.
+  # Tests that need FFmpeg skip themselves, so this job also proves the engine imports and lints without it.
+  python:
+    name: Python ${{ matrix.python }} (no FFmpeg)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.9", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Compile everything
+        run: python -m compileall -q engine/scripts engine/tools engine/tests
+      - name: CLI reference is up to date
+        run: python engine/tools/gen_cli_doc.py --check
+      - name: Tests (fast mode)
+        run: python engine/tests/run_tests.py --fast
+
+  # Real renders with the distribution's FFmpeg. Features that build lacks (libass, libvidstab ...) make their tests skip.
+  full:
+    name: ${{ matrix.os }} / Python ${{ matrix.python }} / FFmpeg
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python: ["3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Install FFmpeg (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg fonts-dejavu-core
+      - name: Install FFmpeg (Windows)
+        if: runner.os == 'Windows'
+        run: choco install ffmpeg --no-progress -y
+      - name: Doctor
+        run: python engine/scripts/mh_video.py doctor
+      - name: Full test suite
+        run: python engine/tests/run_tests.py --durations 15
+      - name: Installer smoke test (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          export HOME="$RUNNER_TEMP/fakehome"
+          mkdir -p "$HOME"
+          bash install.sh
+          test -f "$HOME/.claude/skills/mh-video-editor-skill/SKILL.md"
+          test -f "$HOME/.claude/agents/mh-video-editor.md"
+      - name: Installer smoke test (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $env:USERPROFILE = Join-Path $env:RUNNER_TEMP "fakehome"
+          New-Item -ItemType Directory -Force $env:USERPROFILE | Out-Null
+          & .\install.ps1
+          if (-not (Test-Path (Join-Path $env:USERPROFILE ".claude\skills\mh-video-editor-skill\SKILL.md"))) { throw "skill not installed" }
+          if (-not (Test-Path (Join-Path $env:USERPROFILE ".claude\agents\mh-video-editor.md"))) { throw "agent not installed" }
+
+  coverage:
+    name: Line coverage
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install FFmpeg
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg fonts-dejavu-core
+      - name: Coverage (stdlib sys.monitoring)
+        run: python engine/tests/coverage_report.py --min 85 --json coverage.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: coverage.json
