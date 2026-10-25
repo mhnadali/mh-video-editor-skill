@@ -5,7 +5,7 @@ behind the MP4 export / size-reduction layer, and hand-off notes for continuing 
 
 ## State
 
-Version **0.7.0**. The original five-phase plan (foundation; speed and accuracy; the automated QA gate; new
+Version **0.8.0**. The original five-phase plan (foundation; speed and accuracy; the automated QA gate; new
 capabilities; hardening, documentation and CI) is complete, the first post-v0.5 arc landed in 0.6.0 (cross-environment
 trust, onboarding, a delivery/export layer, editing-quality tooling, broader hardware support, reproducibility), and a
 professional-editing arc landed in 0.7.0 (tracks A-G below). The engine is standard-library Python over FFmpeg, with
@@ -27,8 +27,9 @@ The guiding idea is **the engine measures, the agent judges** (see `references/e
 - **G - architecture & the ML boundary:** documented in `docs/ARCHITECTURE.md`; perception stays heuristic to keep the
   zero-dependency promise.
 
-Next within this arc: combine more scoring cues; sample-accurate onset refinement and a full tempo map; shot-to-shot
-colour matching across a sequence; a single quality score in the gate.
+Next within this arc: combine more scoring cues; shot-to-shot colour matching across a sequence; a dedicated hook pass.
+(Done in 0.8.0: sample-accurate onset refinement and a full tempo map with tempo-following cuts; hue-qualified
+secondary colour correction; a single quality score in the QA gate.)
 
 ## State (prior arc)
 

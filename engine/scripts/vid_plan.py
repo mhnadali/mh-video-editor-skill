@@ -136,6 +136,36 @@ def layout_paced(beats: dict, duration: float, t0: float, period: float, intro_s
     return {"shots": len(cuts) + 1, "cuts": cuts, "last_beat": last_beat}
 
 
+def layout_from_beats(beats: dict, duration: float, t0: float, intro_shots: int = 2,
+                      min_tail_beats: float = 1.5) -> dict:
+    """Geometry from an explicit, possibly variable-spacing beat grid (`beats_refined`), so cuts follow a tempo that
+    speeds up or slows down and do not drift at the end (Track C, full tempo map)."""
+    grid = beats.get("beats_refined") or beats.get("beats") or []
+    if not grid:
+        raise vl.EngineError("no beat grid to follow; run `beats` first")
+    if intro_shots < 0:
+        raise vl.EngineError("intro_shots must be >= 0")
+    if t0 <= 0 and intro_shots:
+        raise vl.EngineError("body starts at 0 s; use intro_shots=0")
+    avg_period = (grid[-1] - grid[0]) / max(len(grid) - 1, 1) if len(grid) > 1 else float(beats.get("period") or 0.5)
+    tail = min_tail_beats * avg_period
+    min_gap = max(0.2, 0.4 * avg_period)       # never let a variable-tempo beat land a micro-shot next to t0 or another cut
+    cuts: list[float] = []
+    for i in range(1, intro_shots):
+        cuts.append(round(t0 * i / intro_shots, 4))
+    if intro_shots:
+        cuts.append(round(t0, 4))
+    last = cuts[-1] if cuts else 0.0
+    for bt in grid:
+        if bt > last + min_gap and bt < duration - tail:
+            cuts.append(round(bt, 4))
+            last = bt
+    cuts = sorted(set(cuts))
+    if len(cuts) < (1 if intro_shots else 0) + 1:
+        raise vl.EngineError("music is too short for this tempo/intro")
+    return {"shots": len(cuts) + 1, "cuts": cuts, "last_beat": len(cuts)}
+
+
 def auto_transitions(n_shots: int, drop_cut: int | None, share: float = 0.45) -> dict[str, str]:
     """Pick which cut points get a transition and which look. Deterministic and varied."""
     cuts = n_shots - 1
@@ -166,12 +196,17 @@ def auto_transitions(n_shots: int, drop_cut: int | None, share: float = 0.45) ->
 def plan(clips: list[dict], beats: dict, *, name: str = "video", music: str | None = None, preset: str = "reels-9x16",
          duration: float | None = None, intro_shots: int = 2, body_start: float | None = None,
          period: float | None = None, grade: str = "warm-desert", transitions: bool = True,
-         align_bars: bool = False, pacing: str | None = None) -> dict:
+         align_bars: bool = False, pacing: str | None = None, follow_tempo: bool = False) -> dict:
     duration = float(duration or beats["duration"])
     period = float(period or beats["period"])
     phase_t = beats["t0"]
     t0 = body_start_time(beats, duration, period, intro_shots, body_start, align_bars)
-    lay = layout_paced(beats, duration, t0, period, intro_shots) if pacing == "energy" else layout(duration, t0, period, intro_shots)
+    if follow_tempo:
+        lay = layout_from_beats(beats, duration, t0, intro_shots)
+    elif pacing == "energy":
+        lay = layout_paced(beats, duration, t0, period, intro_shots)
+    else:
+        lay = layout(duration, t0, period, intro_shots)
     if len(clips) != lay["shots"]:
         raise vl.EngineError(
             f"this music needs {lay['shots']} clips ({intro_shots} intro + {lay['last_beat']} body + 1 outro) "

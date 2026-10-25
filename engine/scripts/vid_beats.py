@@ -339,6 +339,85 @@ def detect_sections(full: list[float], beats: list[float], period: float) -> lis
     return secs
 
 
+def refine_onset(pcm: array.array, t: float, window: float = 0.12) -> float:
+    """Refine an onset time to the steepest short-term energy rise within +-`window` seconds (near-sample-accurate).
+
+    The 10 ms onset grid is fine for choosing beats, but a hit (the drop, a flash) sits better on the exact transient.
+    This scans ~5 ms energy frames at a ~1 ms hop around `t` and returns the time of the largest positive energy step.
+    """
+    i0, i1 = max(0, int((t - window) * SR)), min(len(pcm), int((t + window) * SR))
+    if i1 - i0 < 64:
+        return round(t, 4)
+    hop = max(1, SR // 1000)          # ~1 ms
+    fl = max(hop, SR // 200)          # ~5 ms frame
+    energies, idxs = [], []
+    k = i0
+    while k + fl <= i1:
+        seg = pcm[k:k + fl]
+        energies.append(sum(x * x for x in seg))
+        idxs.append(k)
+        k += hop
+    best = (-1.0, t)
+    for j in range(1, len(energies)):
+        d = energies[j] - energies[j - 1]
+        if d > best[0]:
+            best = (d, idxs[j] / SR)
+    return round(best[1], 4)
+
+
+def tempo_map(onset: list[float], period0: float, segments: int = 8) -> list[dict]:
+    """Tempo over time: fit the local period in each of `segments` windows around the global period (+-10%).
+
+    For a steady track every entry equals the global tempo; for a track that speeds up or slows down the curve follows
+    it, so `beats_following_tempo` can place a grid that does not drift at the end."""
+    n = len(onset)
+    if n < segments * 4:
+        return []
+    seglen = max(1, n // segments)
+    out = []
+    for s in range(0, n, seglen):
+        seg = onset[s:s + seglen]
+        if len(seg) < seglen // 2:
+            break
+        best = (-1.0, period0)
+        for si in range(-20, 21):
+            p = period0 * (1 + si * 0.005)
+            for pi in range(max(1, int(p / 0.02))):
+                sc = _grid_score(seg, p, pi * 0.02)
+                if sc > best[0]:
+                    best = (sc, p)
+        out.append({"t": round(s * FRAME, 2), "bpm": round(60.0 / best[1], 1)})
+    return out
+
+
+def beats_following_tempo(tmap: list[dict], t0: float, duration: float) -> list[float]:
+    """Beat times from `t0` that follow the tempo map (variable spacing), linearly interpolating the instantaneous BPM."""
+    if not tmap:
+        return []
+
+    def bpm_at(t: float) -> float:
+        if t <= tmap[0]["t"]:
+            return tmap[0]["bpm"]
+        if t >= tmap[-1]["t"]:
+            return tmap[-1]["bpm"]
+        for i in range(1, len(tmap)):
+            if t < tmap[i]["t"]:
+                a, b = tmap[i - 1], tmap[i]
+                f = (t - a["t"]) / max(b["t"] - a["t"], 1e-6)
+                return a["bpm"] + f * (b["bpm"] - a["bpm"])
+        return tmap[-1]["bpm"]
+
+    times = [round(t0, 3)]
+    t = t0
+    guard = 0
+    while t < duration - 0.05 and guard < 100000:
+        t += 60.0 / max(bpm_at(t), 1e-6)
+        if t < duration:
+            times.append(round(t, 3))
+        guard += 1
+    return times
+
+
 def analyse(path: str | os.PathLike, max_seconds: float | None = None, bpm_range=(70.0, 180.0),
             bpm: float | None = None, beats_per_bar: int = 4, first_beat: float | None = None) -> dict:
     pcm = decode_pcm(path, max_seconds)
@@ -400,12 +479,16 @@ def analyse(path: str | os.PathLike, max_seconds: float | None = None, bpm_range
         check["notes"].insert(0, forced_note)
     strengths = beat_strengths(on, beat_times)
     secs = detect_sections(full, beat_times, period)
+    tmap = tempo_map(on, period)
+    beats_ref = beats_following_tempo(tmap, t0, duration)
+    drop_refined = refine_onset(pcm, sections["drop"]) if sections["drop"] is not None else None
     return {
         "file": vl.ffp(path), "duration": round(duration, 3), "bpm": round(60 / period, 2),
         "period": round(period, 4), "phase": round(phase, 3), "t0": round(t0, 3),
         "confidence": round(confidence, 2), "alternatives": alts, "beats_per_bar": beats_per_bar,
         "drop": sections["drop"], "drop_beat": sections["drop_beat"], "drop_ratio": sections["drop_ratio"],
-        "beats": beat_times, "beat_strength": strengths, "sections": secs,
+        "drop_refined": drop_refined, "tempo_map": tmap,
+        "beats": beat_times, "beats_refined": beats_ref, "beat_strength": strengths, "sections": secs,
         "bar_phase": bp, "downbeats": [t for k, t in enumerate(beat_times) if k % beats_per_bar == bp],
         "validation": check,
         "note": "Grid fitted to onsets; verify with `plan` output or by ear. If BPM looks doubled/halved, "

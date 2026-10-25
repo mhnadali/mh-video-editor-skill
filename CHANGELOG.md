@@ -2,6 +2,16 @@
 
 All notable changes to this project. Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [SemVer](https://semver.org/).
 
+## [0.8.0] - 2026-10-25 (professional-editing arc, advanced items)
+### Added
+- **Full tempo map + sample-accurate onset (Track C):** `beats` now reports a `tempo_map` (local BPM over the track), `beats_refined` (a variable-spacing grid that follows a speeding-up/slowing-down tempo), and a `drop_refined` time snapped to the exact transient. `plan --follow-tempo` / `need --follow-tempo` place cuts on that grid so late cuts do not drift.
+- **Hue-qualified secondary colour correction (Track D):** an EDL `correct.secondary` list ([{center, width, sat, shift, gain}, ...]) adjusts only pixels near a hue (sky / foliage / skin), baked into a small cached LUT and applied before the look.
+- **Single quality score (Track F):** every QA report carries `quality_score` (0-100): 100 minus 22 per error and 6 per warning. Shown in the report header and documented in `references/qa-gate.md`.
+- Tests for the tempo map, onset refinement, tempo-following layout, secondary correction and the quality score.
+
+### Changed
+- `beats.json` gains `tempo_map`, `beats_refined`, `drop_refined`; `correct` accepts a `secondary` list; all additive and opt-in.
+
 ## [0.7.0] - 2026-10-25 (tracks A-G: editorial intelligence, music structure, colour, reframing)
 ### Added
 - **Editorial measurement (Track A, `vid_editorial.py`):** per-shot shot-size classification (wide/medium/close), camera-motion direction and magnitude (block matching on small grayscale frames), and a saliency centroid - pure Python over FFmpeg-decoded frames, no ML. `score` now stores these as cached fields.

@@ -39,6 +39,8 @@ Exit code 0 = PASS or PASS WITH WARNINGS, 1 = FAIL (`--strict`: 1 on warnings to
 
 Info lines (`chroma-balance`, `luma-range`, `clip-quality`, `editorial`) are context, never failures.
 
+Every report carries a single **`quality_score`** (0-100): it starts at 100 and subtracts 22 per error and 6 per warning (floored at 0). A clean PASS is 100; it is a quick headline, not a substitute for reading the checks, and it cannot judge taste.
+
 ## How to read a report
 1. FAIL: fix the cause (EDL or engine), re-render, run the gate again. Do not hand over a FAIL.
 2. WARN: open the contact sheet and the time stamps in the message. Either fix it or say in the report why it is acceptable (e.g. "loudness -12.9: user approved this level in v4").

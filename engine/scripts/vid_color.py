@@ -88,16 +88,45 @@ def yuv_means_to_rgb(y: float, u: float, v: float) -> tuple[float, float, float]
 IDENTITY_CORRECTION = {"ev": 0.0, "black": 0.0, "white": 1.0, "gamma": 1.0, "gain": [1.0, 1.0, 1.0]}
 
 
+SECONDARY_KEYS = {"center", "width", "sat", "shift", "gain"}
+
+
+def validate_secondary(adjustments) -> list:
+    """Validate a hue-qualified secondary list: [{center, width, sat, shift, gain}, ...]."""
+    if not isinstance(adjustments, list):
+        raise vl.EngineError("correct.secondary must be a list of hue adjustments")
+    for adj in adjustments:
+        if not isinstance(adj, dict):
+            raise vl.EngineError("each correct.secondary entry must be an object")
+        for k in adj:
+            if k not in SECONDARY_KEYS:
+                raise vl.EngineError(f"correct.secondary.{k} is unknown (center, width, sat, shift, gain)")
+        if not 0 <= adj.get("center", 0) <= 360:
+            raise vl.EngineError("correct.secondary.center must be a hue 0..360")
+        if not 5 <= adj.get("width", 40) <= 180:
+            raise vl.EngineError("correct.secondary.width must be 5..180 degrees")
+        if not 0.0 <= adj.get("sat", 1.0) <= 2.0:
+            raise vl.EngineError("correct.secondary.sat must be 0..2")
+        if not -60 <= adj.get("shift", 0.0) <= 60:
+            raise vl.EngineError("correct.secondary.shift must be -60..60 degrees")
+        if not 0.5 <= adj.get("gain", 1.0) <= 2.0:
+            raise vl.EngineError("correct.secondary.gain must be 0.5..2.0")
+    return adjustments
+
+
 def normalize_correction(c: dict | None) -> dict | None:
     """Validate a correction dict (missing keys default to identity). None/empty -> None."""
     if not c:
         return None
     if not isinstance(c, dict):
         raise vl.EngineError("correct must be an object with ev, black, white, gamma, gain")
+    secondary = c.get("secondary")
     out = {k: (list(v) if isinstance(v, list) else v) for k, v in IDENTITY_CORRECTION.items()}
     for k, v in c.items():
+        if k == "secondary":
+            continue
         if k not in out:
-            raise vl.EngineError(f"correct.{k} is unknown (known: ev, black, white, gamma, gain)")
+            raise vl.EngineError(f"correct.{k} is unknown (known: ev, black, white, gamma, gain, secondary)")
         out[k] = v
     if not -3.0 <= out["ev"] <= 3.0:
         raise vl.EngineError("correct.ev must be between -3 and 3 stops")
@@ -112,7 +141,9 @@ def normalize_correction(c: dict | None) -> dict | None:
     g = out["gain"]
     if not (isinstance(g, list) and len(g) == 3 and all(0.5 <= x <= 2.0 for x in g)):
         raise vl.EngineError("correct.gain must be three numbers between 0.5 and 2.0")
-    if is_identity_correction(out):
+    if secondary is not None:
+        out["secondary"] = validate_secondary(secondary)
+    if is_identity_correction(out) and not secondary:
         return None
     return out
 
@@ -467,6 +498,37 @@ def ensure_look_lut(look: dict, strength: float, lut_dir: str | os.PathLike) -> 
     return str(path)
 
 
+def secondary_function(adjustments: list):
+    """-> f(r, g, b): hue-qualified secondary correction. Each adjustment only touches pixels near its hue (sky,
+    foliage, skin), changing saturation, hue and brightness there. Baked into a small LUT like a look."""
+    def f(r: float, g: float, b: float):
+        c = [r, g, b]
+        for adj in adjustments:
+            h, s, v = rgb_to_hsv(*c)
+            w = _hue_weight(h, adj.get("center", 0.0), adj.get("width", 40.0)) * min(1.0, s * 3.0)
+            if w > 0:
+                nh = h + adj.get("shift", 0.0) * w
+                ns = clamp(s * (1.0 + (adj.get("sat", 1.0) - 1.0) * w))
+                nv = clamp(v * (1.0 + (adj.get("gain", 1.0) - 1.0) * w))
+                c = list(hsv_to_rgb(nh, ns, nv))
+        return tuple(clamp(x) for x in c)
+    return f
+
+
+def ensure_secondary_lut(adjustments: list, lut_dir: str | os.PathLike) -> str | None:
+    """Bake a hue-qualified secondary correction into <lut_dir>/sec_<hash>.cube (cached); None if empty."""
+    if not adjustments:
+        return None
+    key = hashlib.sha1(json.dumps(adjustments, sort_keys=True).encode()).hexdigest()[:12]
+    path = Path(lut_dir) / f"sec_{key}.cube"
+    with _LUT_LOCKS_GUARD:
+        lock = _LUT_LOCKS.setdefault(str(path), threading.Lock())
+    with lock:
+        if not path.is_file():
+            write_cube(path, build_lut(secondary_function(adjustments)), LUT_SIZE, title="mh-secondary")
+    return str(path)
+
+
 def vignette_filter(amount: float) -> str:
     """Soft corner darkening. FFmpeg's `angle` is the lens angle: a LARGER angle darkens MORE (measured on 9:16: pi/7 leaves
     the corners at 62% of the centre, pi/3 at 0%). amount 0.2 = pi/7 (the gentle vignette of the approved Maranjab v4)."""
@@ -484,11 +546,17 @@ def grade_chain(grade, correct, lut_dir: str | os.PathLike) -> list[str]:
     """
     chain: list[str] = []
     corr = curves_filter(correct)
+    nc = normalize_correction(correct)
+    secondary = nc.get("secondary") if nc else None
     look = None
     strength, user_lut, user_strength = 1.0, None, 1.0
     if grade:
         look, strength, user_lut, user_strength = resolve_look(grade)
     luts: list[str] = []
+    if secondary:                                                     # hue-qualified secondary correction, before the look
+        sp = ensure_secondary_lut(secondary, lut_dir)
+        if sp:
+            luts.append(f"lut3d=file='{vl.filter_escape_path(sp)}':interp=tetrahedral")
     if look:
         p = ensure_look_lut(look, strength, lut_dir)
         if p:

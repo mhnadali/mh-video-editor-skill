@@ -46,6 +46,8 @@ EXPOSURE_JUMP = 45.0            # luma levels between the 4 frames before and af
 EXPOSURE_JUMP_SHARE = 0.30      # warn when more than this share of the cuts jump that much (v4 had 14%, median jump 12)
 CUT_SCENE_MIN = 0.12            # scene score a hard cut normally exceeds
 CUT_OFFSET_FRAMES = 2
+QUALITY_ERROR_PENALTY = 22      # a single quality score 0-100: each error / warning subtracts this much
+QUALITY_WARN_PENALTY = 6
 
 
 def level_rank(level: str) -> int:
@@ -504,9 +506,11 @@ def run_qa(video: str | os.PathLike, edl_path: str | os.PathLike | None = None, 
         checks += audit_checks
     worst = max((level_rank(c["level"]) for c in checks), default=0)
     verdict = {0: "pass", 1: "pass", 2: "warn", 3: "fail"}[worst]
-    report = {"verdict": verdict, "video": vl.ffp(video), "edl": vl.ffp(edl_path) if edl_path else None,
+    counts = {lv: sum(1 for c in checks if c["level"] == lv) for lv in ("ok", "info", "warn", "error")}
+    quality_score = max(0, min(100, 100 - QUALITY_ERROR_PENALTY * counts["error"] - QUALITY_WARN_PENALTY * counts["warn"]))
+    report = {"verdict": verdict, "quality_score": quality_score, "video": vl.ffp(video), "edl": vl.ffp(edl_path) if edl_path else None,
               "duration": info["duration"], "frames": pic["frames"], "size_mb": round(info["size"] / 1e6, 1),
-              "counts": {lv: sum(1 for c in checks if c["level"] == lv) for lv in ("ok", "info", "warn", "error")},
+              "counts": counts,
               "checks": checks, "audio": aud, "cuts": cut_stats, "edit_audit": audit_data}
     if sheet:
         report["sheet"] = vid_sheets.video_sheet(video, sheet)
@@ -518,7 +522,7 @@ ICON = {"ok": "ok  ", "info": "info", "warn": "WARN", "error": "FAIL"}
 
 def format_report(rep: dict) -> str:
     head = {"pass": "PASS", "warn": "PASS WITH WARNINGS", "fail": "FAIL"}[rep["verdict"]]
-    lines = [f"QA {head}: {Path(rep['video']).name}  ({rep['duration']:.2f}s, {rep['frames']} frames, {rep['size_mb']} MB)"]
+    lines = [f"QA {head} (quality {rep.get('quality_score', '?')}/100): {Path(rep['video']).name}  ({rep['duration']:.2f}s, {rep['frames']} frames, {rep['size_mb']} MB)"]
     for lvl in ("error", "warn", "info", "ok"):
         for c in rep["checks"]:
             if c["level"] == lvl:

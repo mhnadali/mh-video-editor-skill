@@ -138,7 +138,7 @@ mh_video beats [-h] [--out OUT] [--max-seconds MAX_SECONDS] [--bpm BPM] [--beats
 How many clips a beat grid needs.
 
 ```
-mh_video need [-h] [--duration DURATION] [--period PERIOD] [--intro-shots INTRO_SHOTS] [--pacing {beat,energy}] beats
+mh_video need [-h] [--duration DURATION] [--period PERIOD] [--intro-shots INTRO_SHOTS] [--pacing {beat,energy}] [--follow-tempo] beats
 ```
 
 | Argument | Required / default | Meaning |
@@ -148,13 +148,14 @@ mh_video need [-h] [--duration DURATION] [--period PERIOD] [--intro-shots INTRO_
 | `--period PERIOD` |  | override the beat period in seconds |
 | `--intro-shots INTRO_SHOTS` | default `2` | shots before the beat grid starts |
 | `--pacing PACING` | one of `beat`, `energy` | energy = hold calm beats, cut fast on strong ones (Track B) |
+| `--follow-tempo` |  | place cuts on the variable-tempo grid (beats_refined), so late cuts do not drift (Track C) |
 
 ## `plan`
 
 Beat grid + ordered clip list -> EDL.
 
 ```
-mh_video plan [-h] --beats BEATS --clips CLIPS --out OUT [--name NAME] [--music MUSIC] [--preset PRESET] [--duration DURATION] [--period PERIOD] [--intro-shots INTRO_SHOTS] [--grade GRADE] [--no-transitions] [--bar-align] [--pacing {beat,energy}] [--scores SCORES]
+mh_video plan [-h] --beats BEATS --clips CLIPS --out OUT [--name NAME] [--music MUSIC] [--preset PRESET] [--duration DURATION] [--period PERIOD] [--intro-shots INTRO_SHOTS] [--grade GRADE] [--no-transitions] [--bar-align] [--pacing {beat,energy}] [--follow-tempo] [--scores SCORES]
 ```
 
 | Argument | Required / default | Meaning |
@@ -172,6 +173,7 @@ mh_video plan [-h] --beats BEATS --clips CLIPS --out OUT [--name NAME] [--music 
 | `--no-transitions` |  | hard cuts only |
 | `--bar-align` |  | start the body on a downbeat (needs bar_phase in beats.json) |
 | `--pacing PACING` | one of `beat`, `energy` | energy = hold calm beats, cut fast on strong ones (Track B) |
+| `--follow-tempo` |  | place cuts on the variable-tempo grid (beats_refined), so late cuts do not drift (Track C) |
 | `--scores SCORES` |  | work folder containing scores.json: fill src_start from each clip's best window |
 
 ## `lint`

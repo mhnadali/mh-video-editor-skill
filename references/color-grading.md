@@ -80,3 +80,10 @@ Legacy `style.grade` values still work: a grade preset name (`warm-desert`, `neu
 - Skin and sky are the reference: if people turn orange or the sky turns cyan, lower the strength.
 - Vignette: FFmpeg's `angle` is a lens angle, **larger = darker corners**. Amount 0.2 is the approved level; do not go above 0.4.
 - Never rely on automatic correction without looking at the frames and, for doubtful shots, the scopes.
+
+## Secondary correction (hue-qualified)
+A shot's `correct` may carry a `secondary` list that adjusts only pixels near a hue (sky, foliage, skin), after the
+primary correction and before the look. Each entry is `{ "center": hue 0-360, "width": degrees, "sat": 0-2,
+"shift": -60..60, "gain": 0.5-2 }`; it is baked into a small cached LUT. Example: desaturate a cyan sky without
+touching skin — `"correct": {"secondary": [{"center": 220, "width": 50, "sat": 0.5}]}`. White balance has a
+skin-protecting mode: `color plan --wb skin` neutralises a cast but never cools the image.
