@@ -61,12 +61,7 @@ jobs:
         run: choco install ffmpeg --no-progress -y
       - name: Install FFmpeg (macOS)
         if: runner.os == 'macOS'
-        env:
-          HOMEBREW_NO_AUTO_UPDATE: "1"
-          HOMEBREW_NO_INSTALL_CLEANUP: "1"
-        run: |
-          brew install ffmpeg || brew link --overwrite --force ffmpeg
-          ffmpeg -version | head -1
+        uses: federico-carboni/setup-ffmpeg@v3
       - name: Installer smoke test (macOS)
         if: runner.os == 'macOS'
         run: |
