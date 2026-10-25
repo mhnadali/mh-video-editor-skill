@@ -707,7 +707,7 @@ def render(edl_path: str | os.PathLike, out: str | os.PathLike | None = None, pr
             cmd += ["-an"]
         cmd += enc_args + ["-pix_fmt", vid_deliver.PIX_FMT, "-r", str(p["fps"]), "-t", f"{p['duration']:.3f}"]
         if to_null:
-            cmd += ["-f", "null", os.devnull]
+            cmd += ["-f", "null", "-"]
         else:
             cmd += ["-movflags", "+faststart", vl.ffp(target)]
         return vl.run(cmd, check=False)
