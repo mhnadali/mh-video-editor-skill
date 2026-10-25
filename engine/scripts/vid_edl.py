@@ -177,8 +177,9 @@ def structure_errors(edl) -> list[dict]:
     for k in ("fade_in", "fade_out", "music_fade_in", "music_fade_out"):
         if k in p and not (_num(p[k]) and 0 <= p[k] <= 30):
             bad("project", f"project.{k} must be 0-30 seconds, found {p[k]!r}")
-    if p.get("music") is not None and not isinstance(p["music"], str):
-        bad("project", "project.music must be a file path or null")
+    mu = p.get("music")
+    if mu is not None and not (isinstance(mu, str) or (isinstance(mu, list) and all(isinstance(x, str) for x in mu))):
+        bad("project", "project.music must be a file path, a list of file paths (music sections), or null")
     if p.get("preset") is not None and not isinstance(p["preset"], str):
         bad("project", "project.preset must be a preset name")
     st = edl.get("style") or {}
@@ -358,8 +359,10 @@ def _lint(edl: dict, check_files: bool = True) -> list[dict]:
             out += ffmpeg_gaps(edl, vl.available_filters())
         except vl.EngineError:
             pass                                      # no FFmpeg at all: the render reports that
+        mu = p.get("music")
+        warm_music = [m for m in (mu if isinstance(mu, list) else ([mu] if mu else [])) if m and os.path.isfile(m)]
         vl.probe_many([s.get("clip") for s in shots if s.get("clip") and os.path.isfile(s["clip"])]
-                      + ([p["music"]] if p.get("music") and os.path.isfile(p["music"]) else []))   # warm the probe cache in parallel
+                      + warm_music)   # warm the probe cache in parallel
         seen: dict[tuple, int] = {}
         for j, shot in enumerate(shots):
             clip = shot.get("clip")
@@ -379,16 +382,17 @@ def _lint(edl: dict, check_files: bool = True) -> list[dict]:
             if info["duration"] and info["duration"] < need + 0.2:
                 out.append(_issue("warn", "clip-short", f"shot {j}: clip is {info['duration']:.2f}s but the shot needs {need:.2f}s (last frame will freeze)"))
         music = p.get("music")
-        if music:
-            if not os.path.isfile(music):
-                out.append(_issue("error", "music-missing", f"music not found: {music}"))
-            else:
-                try:
-                    md = vl.probe(music)["duration"]
-                    if abs(md - p["duration"]) > 0.15:
-                        out.append(_issue("warn", "music-length", f"music is {md:.2f}s but project.duration is {p['duration']:.2f}s"))
-                except vl.EngineError as e:
-                    out.append(_issue("error", "music-unreadable", str(e).splitlines()[0]))
+        music_files = music if isinstance(music, list) else ([music] if music else [])
+        for mi, mf in enumerate(music_files):
+            if not os.path.isfile(mf):
+                out.append(_issue("error", "music-missing", f"music not found: {mf}"))
+                continue
+            try:
+                md = vl.probe(mf)["duration"]
+                if len(music_files) == 1 and abs(md - p["duration"]) > 0.15:
+                    out.append(_issue("warn", "music-length", f"music is {md:.2f}s but project.duration is {p['duration']:.2f}s"))
+            except vl.EngineError as e:
+                out.append(_issue("error", "music-unreadable", str(e).splitlines()[0]))
     return out
 
 

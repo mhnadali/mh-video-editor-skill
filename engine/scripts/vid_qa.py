@@ -57,9 +57,11 @@ def _read_series(path: Path, prefix: str, keys: tuple[str, ...]) -> dict[str, li
     out: dict[str, list[float]] = {k: [] for k in keys}
     if path.exists():
         for line in path.read_text(errors="replace").splitlines():
-            m = re.match(rf"{re.escape(prefix)}(\w+)=([\d.eE+-]+)", line.strip())
+            m = re.match(rf"{re.escape(prefix)}(\w+)=(\S+)", line.strip())
             if m and m.group(1) in out:
-                out[m.group(1)].append(float(m.group(2)))
+                v = vl.parse_float(m.group(2))
+                if v is not None:
+                    out[m.group(1)].append(v)
     return out
 
 

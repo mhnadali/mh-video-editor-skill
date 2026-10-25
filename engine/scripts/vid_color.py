@@ -192,6 +192,18 @@ LOOKS: dict[str, dict] = {
     "bw-contrast": {
         "description": "Black and white with strong contrast and a slight red filter.",
         "mono": {"weights": [0.45, 0.45, 0.10]}, "contrast": 0.30, "pivot": 0.45, "shoulder": 0.90, "vignette": 0.30},
+    "muted-matte": {
+        "description": "Understated editorial matte: softened colour, lifted blacks, rolled highlights, gentle contrast.",
+        "contrast": 0.10, "pivot": 0.46, "saturation": 0.82, "black": 0.03, "white": 0.97, "shoulder": 0.82,
+        "shadows": [-0.004, 0.002, 0.008]},
+    "cool-blue": {
+        "description": "Cool blue cast for night, water and urban scenes: teal-leaning shadows, crisp contrast.",
+        "contrast": 0.14, "pivot": 0.45, "saturation": 0.98, "shoulder": 0.88,
+        "cdl": {"slope": [0.96, 1.00, 1.06]}, "shadows": [-0.010, 0.000, 0.020]},
+    "warm-film": {
+        "description": "Warm film emulation: amber highlights, protected blacks, soft shoulder, a hint of vignette.",
+        "contrast": 0.14, "pivot": 0.45, "saturation": 1.04, "black": 0.02, "shoulder": 0.84,
+        "cdl": {"slope": [1.05, 1.00, 0.93]}, "highlights": [0.020, 0.008, -0.012], "vignette": 0.12},
 }
 LOOK_KEYS = {"description", "exposure", "contrast", "pivot", "black", "white", "shoulder", "cdl", "shadows", "mids",
              "highlights", "saturation", "vibrance", "hue_shifts", "mono", "vignette"}
@@ -523,9 +535,11 @@ def measure_window(path: str, start: float, dur: float = 1.0, hdr: bool = False,
             return None
         vals: dict[str, list[float]] = {k: [] for k in _STAT_KEYS}
         for line in s.read_text(errors="replace").splitlines():
-            m = re.match(r"lavfi\.signalstats\.(\w+)=([\d.eE+-]+)", line.strip())
+            m = re.match(r"lavfi\.signalstats\.(\w+)=(\S+)", line.strip())
             if m and m.group(1) in vals:
-                vals[m.group(1)].append(float(m.group(2)))
+                v = vl.parse_float(m.group(2))
+                if v is not None:
+                    vals[m.group(1)].append(v)
     if not vals["YAVG"]:
         return None
     return {k: sum(v) / len(v) for k, v in vals.items() if v}

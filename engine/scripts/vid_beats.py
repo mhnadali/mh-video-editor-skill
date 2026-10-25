@@ -254,11 +254,12 @@ def bar_phase(low: list[float], beats: list[float], beats_per_bar: int = 4) -> t
         return 0, 0.0
     best = max(range(beats_per_bar), key=lambda p: means[p])
     others = [m for p, m in enumerate(means) if p != best]
-    conf = (means[best] - (sum(others) / len(others))) / means[best] if means[best] > 0 else 0.0
+    conf = (means[best] - (sum(others) / len(others))) / means[best] if (others and means[best] > 0) else 0.0
     return best, round(max(0.0, min(1.0, conf * 2)), 2)
 
 
-def validate(on: list[float], low: list[float], period: float, phase: float, beats: list[float]) -> dict:
+def validate(on: list[float], low: list[float], period: float, phase: float, beats: list[float],
+             beats_per_bar: int = 4) -> dict:
     """Second opinion on the grid. Everything here is advice for a human: warnings, never hard failures."""
     notes: list[str] = []
     pk = peak_times(on)
@@ -276,24 +277,41 @@ def validate(on: list[float], low: list[float], period: float, phase: float, bea
         notes.append(f"tempo drifts {st['drift_pct']}% between the first and second half: late cuts may slip off the beat")
     if st["median_onset_error_ms"] > 35:
         notes.append(f"strong onsets sit {st['median_onset_error_ms']} ms from the 16th-note grid (median): the track may be swung or live-played")
-    bp, bc = bar_phase(low, beats)
+    bp, bc = bar_phase(low, beats, beats_per_bar)
     return {"second_tempo_bpm": round(ioi, 1) if ioi else None, "second_relation": rel, **st,
             "bar_phase": bp, "bar_confidence": bc, "notes": notes,
             "ok": not notes}
 
 
-def analyse(path: str | os.PathLike, max_seconds: float | None = None, bpm_range=(70.0, 180.0)) -> dict:
+def analyse(path: str | os.PathLike, max_seconds: float | None = None, bpm_range=(70.0, 180.0),
+            bpm: float | None = None, beats_per_bar: int = 4, first_beat: float | None = None) -> dict:
     pcm = decode_pcm(path, max_seconds)
     duration = len(pcm) / SR
     if duration < 3:
         raise vl.EngineError("audio shorter than 3 seconds: cannot estimate a beat grid")
+    if beats_per_bar < 1:
+        raise vl.EngineError("beats-per-bar must be >= 1")
     low, high, full = _bands(pcm)
     on = onset_strength(low, high)
-    scores = _autocorr_scores(on, *bpm_range)
-    if not scores:
-        raise vl.EngineError("no tempo candidates found (audio too short or silent)")
-    top_lag = scores[0][1]
-    period, phase, grid = fit_grid(on, top_lag * FRAME)
+    forced_note = None
+    if bpm is not None:
+        if not 20.0 <= float(bpm) <= 400.0:
+            raise vl.EngineError("forced bpm must be between 20 and 400")
+        period = 60.0 / float(bpm)
+        best = (-1.0, 0.0)                                   # best phase for this fixed tempo
+        for pi in range(max(1, int(period / 0.005))):
+            ph = pi * 0.005
+            sc = _grid_score(on, period, ph)
+            if sc > best[0]:
+                best = (sc, ph)
+        grid, phase = best[0], best[1]
+        forced_note = f"tempo forced to {float(bpm):.1f} BPM"
+    else:
+        scores = _autocorr_scores(on, *bpm_range)
+        if not scores:
+            raise vl.EngineError("no tempo candidates found (audio too short or silent)")
+        top_lag = scores[0][1]
+        period, phase, grid = fit_grid(on, top_lag * FRAME)
     # alternatives: half and double tempo, scored on the same onset curve
     alts = []
     for mult in (0.5, 2.0):
@@ -304,24 +322,34 @@ def analyse(path: str | os.PathLike, max_seconds: float | None = None, bpm_range
             alts.append({"bpm": round(bpm2, 1), "period": round(p2, 4), "score": round(best, 3)})
     mean_on = sum(on) / len(on) or 1e-9
     confidence = min(1.0, max(0.0, (grid / mean_on - 1.0) / 4.0))
-    # first strong beat: first grid beat after the onset curve first exceeds 25% of its robust max
-    rob = sorted(on)[int(len(on) * 0.97)] or 1.0
-    start_i = next((i for i, v in enumerate(on) if v > 0.25 * rob), 0)
-    k0 = max(0, math.ceil((start_i * FRAME - phase - 0.5 * period) / period))
-    t0 = phase + k0 * period
+    if bpm is not None:
+        confidence = max(confidence, 0.6)                    # the user gave the tempo
+    if first_beat is not None:
+        if not 0.0 <= float(first_beat) < duration:
+            raise vl.EngineError("first-beat must be between 0 and the track length")
+        t0 = round(float(first_beat), 3)
+        phase = t0 % period
+    else:
+        # first strong beat: first grid beat after the onset curve first exceeds 25% of its robust max
+        rob = sorted(on)[int(len(on) * 0.97)] or 1.0
+        start_i = next((i for i, v in enumerate(on) if v > 0.25 * rob), 0)
+        k0 = max(0, math.ceil((start_i * FRAME - phase - 0.5 * period) / period))
+        t0 = phase + k0 * period
     sections = find_sections(full, period, t0, duration)
     nbeats = int((duration - t0) / period) + 1
     beat_times = [round(t0 + k * period, 3) for k in range(nbeats)]
-    check = validate(on, low, period, phase, beat_times)
+    check = validate(on, low, period, phase, beat_times, beats_per_bar)
     bp = check["bar_phase"]
+    if forced_note:
+        check["notes"].insert(0, forced_note)
     return {
         "file": vl.ffp(path), "duration": round(duration, 3), "bpm": round(60 / period, 2),
         "period": round(period, 4), "phase": round(phase, 3), "t0": round(t0, 3),
-        "confidence": round(confidence, 2), "alternatives": alts,
+        "confidence": round(confidence, 2), "alternatives": alts, "beats_per_bar": beats_per_bar,
         "drop": sections["drop"], "drop_beat": sections["drop_beat"], "drop_ratio": sections["drop_ratio"],
         "beats": beat_times,
-        "bar_phase": bp, "downbeats": [t for k, t in enumerate(beat_times) if k % 4 == bp],
+        "bar_phase": bp, "downbeats": [t for k, t in enumerate(beat_times) if k % beats_per_bar == bp],
         "validation": check,
         "note": "Grid fitted to onsets; verify with `plan` output or by ear. If BPM looks doubled/halved, "
-                "pass the alternative period to `plan --period`.",
+                "pass the alternative period to `plan --period` (or force it with `beats --bpm`).",
     }

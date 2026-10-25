@@ -20,10 +20,11 @@ import os
 import re
 import struct
 import time
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 import vid_color
+import vid_deliver
 import vid_edl as ve
 import vid_motion
 import vid_sfx
@@ -39,16 +40,40 @@ _ENC_CACHE: dict[str, bool] = {}
 # --------------------------------------------------------------------------- encoder choice
 
 def nvenc_works() -> bool:
-    if "nvenc" in _ENC_CACHE:
-        return _ENC_CACHE["nvenc"]
-    try:
-        r = vl.run([vl.find_ffmpeg()["ffmpeg"], "-v", "error", "-f", "lavfi", "-i", "color=c=black:s=256x256:d=0.2",
-                    "-c:v", "h264_nvenc", "-f", "null", "-"], check=False, timeout=30)
-        ok = r.returncode == 0
-    except Exception:
-        ok = False
-    _ENC_CACHE["nvenc"] = ok
+    return encoder_available("nvenc")
+
+
+# h264 hardware encoders by short name -> the FFmpeg encoder. `auto` tries these in order, then libx264.
+HW_H264 = {"nvenc": "h264_nvenc", "videotoolbox": "h264_videotoolbox", "qsv": "h264_qsv", "vaapi": "h264_vaapi", "amf": "h264_amf"}
+HW_PREFERENCE = ("nvenc", "videotoolbox", "qsv")        # encoders the assembly can feed system frames to directly
+
+
+def encoder_available(kind: str) -> bool:
+    """Does this machine have a working `kind` H.264 encoder? A 0.2 s null encode is the only reliable probe (a
+    present encoder can still fail without the GPU/driver). Cached per process."""
+    if kind in _ENC_CACHE:
+        return _ENC_CACHE[kind]
+    enc = HW_H264.get(kind)
+    ok = False
+    if enc:
+        src = ["-f", "lavfi", "-i", "color=c=black:s=256x256:d=0.2"]
+        try:
+            if kind == "vaapi":
+                dev = os.environ.get("MH_VAAPI_DEVICE", "/dev/dri/renderD128")
+                cmd = ([vl.find_ffmpeg()["ffmpeg"], "-v", "error", "-vaapi_device", dev] + src +
+                       ["-vf", "format=nv12,hwupload", "-c:v", enc, "-f", "null", "-"])
+            else:
+                cmd = [vl.find_ffmpeg()["ffmpeg"], "-v", "error"] + src + ["-c:v", enc, "-f", "null", "-"]
+            ok = vl.run(cmd, check=False, timeout=30).returncode == 0
+        except Exception:
+            ok = False
+    _ENC_CACHE[kind] = ok
     return ok
+
+
+def hw_encoders() -> dict:
+    """{short name: available?} for every hardware H.264 encoder the engine knows about (for `doctor`)."""
+    return {k: encoder_available(k) for k in HW_H264}
 
 
 def hwdecode_args(mode: str) -> list[str]:
@@ -61,13 +86,49 @@ def hwdecode_args(mode: str) -> list[str]:
     return []
 
 
-def encoder_args(pref: str, preview: bool) -> tuple[list[str], str]:
+def _resolve_encoder(pref: str) -> str:
+    """short name ('auto'|'libx264'|'nvenc'|...) -> the chosen short name, honouring availability."""
     pref = (pref or "auto").lower()
-    if pref in ("auto", "nvenc") and nvenc_works():
+    if pref == "libx264":
+        return "libx264"
+    if pref == "auto":
+        for k in HW_PREFERENCE:
+            if encoder_available(k):
+                return k
+        return "libx264"
+    if pref in HW_H264:
+        if encoder_available(pref):
+            return pref
+        raise vl.EngineError(f"{pref} encoder requested but not available on this machine "
+                             "(run `doctor` to see which hardware encoders work here)")
+    raise vl.EngineError(f"unknown encoder '{pref}'")
+
+
+def encoder_args(pref: str, preview: bool, bitrate_kbps: int | None = None, maxrate_kbps: int | None = None,
+                 two_pass: int | None = None, passlog: str | None = None) -> tuple[list[str], str]:
+    """FFmpeg video-encoder arguments. With `bitrate_kbps` the encoder targets a bitrate (for a size budget); otherwise
+    it uses constant quality. `two_pass` is 1 or 2 for the two libx264 passes of a strict size target."""
+    kind = _resolve_encoder(pref)
+    enc = "libx264" if kind == "libx264" else HW_H264[kind]
+    if bitrate_kbps:
+        mr = maxrate_kbps or int(bitrate_kbps * 1.45)
+        buf = int(mr * 2)
+        if kind == "libx264":
+            args = ["-c:v", "libx264", "-preset", "veryfast" if preview else "slow",
+                    "-b:v", f"{bitrate_kbps}k", "-maxrate", f"{mr}k", "-bufsize", f"{buf}k"]
+            if two_pass:
+                args += ["-pass", str(two_pass), "-passlogfile", passlog or "mh_pass"]
+            return args, "libx264"
+        if kind == "nvenc":
+            return (["-c:v", enc, "-preset", "p5", "-rc", "vbr", "-b:v", f"{bitrate_kbps}k",
+                     "-maxrate", f"{mr}k", "-bufsize", f"{buf}k"], enc)
+        return ["-c:v", enc, "-b:v", f"{bitrate_kbps}k", "-maxrate", f"{mr}k", "-bufsize", f"{buf}k"], enc
+    if kind == "nvenc":
         q = "28" if preview else "21"
-        return ["-c:v", "h264_nvenc", "-preset", "p5", "-rc", "vbr", "-cq", q, "-b:v", "0"], "h264_nvenc"
-    if pref == "nvenc":
-        raise vl.EngineError("NVENC requested but not available on this machine")
+        return ["-c:v", enc, "-preset", "p5", "-rc", "vbr", "-cq", q, "-b:v", "0"], enc
+    if kind in ("videotoolbox", "qsv", "vaapi", "amf"):
+        return ["-c:v", enc, "-q:v", "55" if preview else "40"] if kind == "videotoolbox" else \
+               ["-c:v", enc, "-global_quality", "28" if preview else "22"], enc
     crf = "24" if preview else "18"
     return ["-c:v", "libx264", "-preset", "veryfast" if preview else "slow", "-crf", crf], "libx264"
 
@@ -530,10 +591,45 @@ def build_graph(edl: dict, parts: list[dict], bounds: list[int], trans: dict[int
     return lines, extra
 
 
+def resolve_music(edl: dict, work: Path) -> str | None:
+    """Return a single music file path for the render. `project.music` may be a list of user tracks (phase 10 music
+    sections): they are concatenated, equal-loudness-formatted, into one cached wav so the rest of the audio pipeline
+    (fades, ducking, two-pass master) is unchanged."""
+    p = ve.project(edl)
+    music = p.get("music")
+    if not music or isinstance(music, str):
+        return music if music else None
+    files = [m for m in music if m]
+    if not files:
+        return None
+    if len(files) == 1:
+        return files[0]
+    for f in files:
+        if not os.path.isfile(f):
+            raise vl.EngineError(f"music track not found: {f}")
+    stats = [(vl.ffp(f), os.stat(f).st_size, int(os.stat(f).st_mtime)) for f in files]
+    key = hashlib.sha1(json.dumps(stats, sort_keys=True).encode()).hexdigest()[:16]
+    work.mkdir(parents=True, exist_ok=True)
+    out = work / f"music_{key}.wav"
+    if out.is_file() and cached_media_ok(out, 0.0, 1e9, video=False):
+        return str(out)
+    ff = vl.find_ffmpeg()["ffmpeg"]
+    cmd = [ff, "-v", "error", "-y"]
+    for f in files:
+        cmd += ["-i", vl.ffp(f)]
+    fmt = "".join(f"[{i}:a]aformat=sample_rates=44100:channel_layouts=stereo[a{i}];" for i in range(len(files)))
+    fmt += "".join(f"[a{i}]" for i in range(len(files))) + f"concat=n={len(files)}:v=0:a=1[a]"
+    cmd += ["-filter_complex", fmt, "-map", "[a]", "-c:a", "pcm_s16le", vl.ffp(out)]
+    vl.run(cmd)
+    return str(out)
+
+
 def render(edl_path: str | os.PathLike, out: str | os.PathLike | None = None, preview: bool = False,
            encoder: str = "auto", workdir: str | os.PathLike | None = None, use_cache: bool = True,
            force: bool = False, workers: int | None = None, log=vl.say, hwdecode: str = "auto",
-           qa: bool = False, fmt: str | None = None) -> dict:
+           qa: bool = False, fmt: str | None = None, delivery: str | None = None, target_size_mb: float | None = None,
+           bitrate: int | None = None, manifest: bool = False, bundle: bool = False,
+           json_out: str | os.PathLike | None = None) -> dict:
     t_start = time.time()
     edl = ve.load(edl_path)
     issues = ve.lint(edl)
@@ -544,10 +640,23 @@ def render(edl_path: str | os.PathLike, out: str | os.PathLike | None = None, pr
         raise vl.EngineError("EDL has errors; fix them first:\n" + ve.format_issues(issues))
     if issues:
         log(ve.format_issues(issues))
+    deliv = None
+    if delivery:
+        deliv = vid_deliver.resolve_delivery(delivery)
+        edl.setdefault("style", {})["loudness"] = deliv["loudness"]        # platform loudness target for the master
+        if fmt is None:
+            native = vl.load_preset(deliv["format"])
+            pj = ve.project(edl)
+            if (native["width"], native["height"]) != (pj["width"], pj["height"]):
+                fmt = deliv["format"]
     p = ve.project(edl)
     scale = 0.5 if preview else 1.0
     base = Path(edl_path).resolve().parent
     work = Path(workdir) if workdir else base / (Path(edl_path).stem + "_work")
+    music_path = resolve_music(edl, work)
+    if isinstance((edl.get("project") or {}).get("music"), list):
+        edl["project"]["music"] = music_path                              # the rest of the pipeline wants one file
+        p = ve.project(edl)
     tag = format_tag(fmt)
     pdir = work / ("parts_preview" if preview else "parts") / (tag or "main")
     pdir.mkdir(parents=True, exist_ok=True)
@@ -557,9 +666,16 @@ def render(edl_path: str | os.PathLike, out: str | os.PathLike | None = None, pr
     size = output_size(edl, fmt, scale)
     log(f"rendering {n} shots ({'preview' if preview else 'final'}{', ' + fmt if fmt else ''}, {size[0]}x{size[1]}) ...")
     t_parts = time.time()
+    done = 0
     with ThreadPoolExecutor(workers or vl.cpu_workers(4)) as ex:
-        futs = [ex.submit(render_part, edl, j, bounds, trans, scale, pdir, use_cache, hwdecode, fmt) for j in range(n)]
-        parts = [f.result() for f in futs]
+        futs = {ex.submit(render_part, edl, j, bounds, trans, scale, pdir, use_cache, hwdecode, fmt): j for j in range(n)}
+        parts_by_j: dict[int, dict] = {}
+        for fut in as_completed(futs):
+            parts_by_j[futs[fut]] = fut.result()
+            done += 1
+            if n >= 8 and done % max(1, n // 4) == 0:
+                log(f"  parts {done}/{n}")
+        parts = [parts_by_j[j] for j in range(n)]
     cached = sum(1 for x in parts if x["cached"])
     parts_seconds = round(time.time() - t_parts, 1)
     master = master_audio(edl, work, log, bounds, trans)
@@ -571,19 +687,45 @@ def render(edl_path: str | os.PathLike, out: str | os.PathLike | None = None, pr
                                text_filter=text_filter)
     graph_file = work / (("graph_preview" if preview else "graph") + (f"_{tag}" if tag else "") + ".txt")
     graph_file.write_text(";\n".join(lines), encoding="utf-8")
-    enc, enc_name = encoder_args(encoder, preview)
+    video_kbps = None
+    if bitrate:
+        video_kbps = int(bitrate)
+    elif target_size_mb:
+        video_kbps = vid_deliver.video_kbps_for_size(float(target_size_mb), p["duration"], vid_deliver.AUDIO_KBPS)
+    maxrate = int(deliv["max_mbps"] * 1000) if (deliv and video_kbps) else None
     out_path = Path(out) if out else base / f"{p.get('name', 'video')}{'_' + tag if tag else ''}{'_preview' if preview else ''}.mp4"
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    cmd = [vl.find_ffmpeg()["ffmpeg"], "-v", "error", "-y"]
-    for x in parts:
-        cmd += ["-i", vl.ffp(x["path"])]
-    cmd += extra + [vl.filter_script_flag(), vl.ffp(graph_file), "-map", "[vout]"]
-    if p.get("music"):
-        cmd += ["-map", "[aout]", "-c:a", "aac", "-b:a", "192k"]
-    cmd += enc + ["-pix_fmt", "yuv420p", "-r", str(p["fps"]), "-movflags", "+faststart", "-t", f"{p['duration']:.3f}", vl.ffp(out_path)]
+
+    def assemble(enc_args: list[str], target: str | os.PathLike, map_audio: bool, to_null: bool = False) -> "object":
+        cmd = [vl.find_ffmpeg()["ffmpeg"], "-v", "error", "-y"]
+        for x in parts:
+            cmd += ["-i", vl.ffp(x["path"])]
+        cmd += extra + [vl.filter_script_flag(), vl.ffp(graph_file), "-map", "[vout]"]
+        if map_audio and p.get("music"):
+            cmd += ["-map", "[aout]", "-c:a", "aac", "-b:a", f"{vid_deliver.AUDIO_KBPS}k"]
+        elif not map_audio:
+            cmd += ["-an"]
+        cmd += enc_args + ["-pix_fmt", vid_deliver.PIX_FMT, "-r", str(p["fps"]), "-t", f"{p['duration']:.3f}"]
+        if to_null:
+            cmd += ["-f", "null", os.devnull]
+        else:
+            cmd += ["-movflags", "+faststart", vl.ffp(target)]
+        return vl.run(cmd, check=False)
+
     log("assembling ...")
     t_asm = time.time()
-    r = vl.run(cmd, check=False)
+    two_pass = bool(video_kbps) and _resolve_encoder(encoder) == "libx264" and not preview
+    if two_pass:
+        passlog = str(work / f"pass_{tag or 'main'}")
+        enc1, _ = encoder_args(encoder, preview, video_kbps, maxrate, two_pass=1, passlog=passlog)
+        r = assemble(enc1, out_path, map_audio=True, to_null=True)
+        if r.returncode != 0:
+            raise vl.EngineError(f"assembly (pass 1) failed (exit {r.returncode}):\n{(r.stderr or '')[-1200:]}")
+        enc, enc_name = encoder_args(encoder, preview, video_kbps, maxrate, two_pass=2, passlog=passlog)
+        r = assemble(enc, out_path, map_audio=True)
+    else:
+        enc, enc_name = encoder_args(encoder, preview, video_kbps, maxrate)
+        r = assemble(enc, out_path, map_audio=True)
     assemble_seconds = round(time.time() - t_asm, 1)
     if r.returncode != 0:
         raise vl.EngineError(f"assembly failed (exit {r.returncode}):\n{(r.stderr or '')[-1200:]}")
@@ -593,10 +735,21 @@ def render(edl_path: str | os.PathLike, out: str | os.PathLike | None = None, pr
         qa_report = vid_qa.run_qa(out_path, edl_path, sheet=str(Path(out_path).with_suffix("")) + "_check.jpg", fmt=fmt)
         vid_qa.save_report(qa_report, str(Path(out_path).with_suffix("")) + ".qa.json")
         log(vid_qa.format_report(qa_report))
-    return {"out": str(out_path), "shots": n, "qa": qa_report["verdict"] if qa_report else None, "parts_cached": cached, "encoder": enc_name,
-            "frames": vl.frames(p["duration"], p["fps"]), "seconds": round(time.time() - t_start, 1),
-            "parts_seconds": parts_seconds, "assemble_seconds": assemble_seconds,
-            "preview": preview, "workdir": str(work), "format": fmt, "size": list(size)}
+    info = vl.probe(out_path)
+    result = {"out": str(out_path), "shots": n, "qa": qa_report["verdict"] if qa_report else None, "parts_cached": cached, "encoder": enc_name,
+              "frames": vl.frames(p["duration"], p["fps"]), "seconds": round(time.time() - t_start, 1),
+              "parts_seconds": parts_seconds, "assemble_seconds": assemble_seconds,
+              "preview": preview, "workdir": str(work), "format": fmt, "size": list(size), "size_mb": round((info.get("size") or 0) / 1e6, 2)}
+    if delivery or target_size_mb:
+        result["delivery_check"] = vid_deliver.verify_delivery(info, float(target_size_mb) if target_size_mb else None, delivery)
+    if manifest:
+        result["manifest"] = vid_deliver.write_manifest(edl_path, edl, out_path, result)
+    if bundle:
+        result["bundle"] = vid_deliver.build_bundle(edl_path, workdir=work)
+    if json_out:
+        vl.save_json(json_out, result)
+        result["json"] = str(json_out)
+    return result
 
 
 STANDARD_FORMATS = ("reels-9x16", "youtube-16x9", "square-1x1")

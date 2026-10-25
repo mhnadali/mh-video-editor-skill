@@ -56,6 +56,8 @@ Before touching footage, make sure a confirmed `video-brief.md` exists in the pr
 ### 4. Render
 `render video.edl.json --preview` first (half size), look at it (`verify`), then `render video.edl.json` for the final. Parts are cached by content, so changing one shot re-renders one shot (a 28 s, 39-shot project: cold preview about 40 s, cold final about 70 s, preview from a warm cache about 9 s). `--format youtube-16x9|square-1x1` or `--all-formats` renders other shapes from the same EDL (blur-fill reframing). `--encoder auto` uses NVENC when the machine has it and `--hwdecode auto` decodes sources on the GPU (CUDA) with an automatic software fallback; `--workers` rarely helps beyond 4; `--qa` runs the gate after the final render. The result prints `parts_seconds` and `assemble_seconds` so you can see where time goes. Outputs go next to the EDL unless `--out` is given; never overwrite the user's source folder.
 
+For a platform deliverable, add `--delivery reels|tiktok|shorts|stories|youtube|square` (sets the format, loudness target and container), `--target-size-mb N` to stay under a size limit (two-pass), `--manifest` to record versions and hashes for reproducibility, and `--bundle` to zip the EDL and its sidecars for hand-off (see `references/delivery.md`). `project.music` may be a list of user tracks (music sections), concatenated automatically.
+
 ### 4b. Finishing layers (all optional, all EDL fields; add only what the brief asks for)
 | Layer | How | Reference |
 |---|---|---|
@@ -110,6 +112,7 @@ Delegate to `mh-video-editor` (`agents/mh-video-editor.md`) only after the brief
 | `references/text-persian.md` | Text, Persian shaping, fonts, safe areas, SRT |
 | `references/formats.md` | 9:16 / 16:9 / 1:1, reframing |
 | `references/sound-design.md` | Whooshes, ducking, ambient sound, mastering |
+| `references/delivery.md` | Delivery presets, size/bitrate targeting, render manifest and project bundle |
 | `engine/scripts/` | The CLI and modules |
 | `engine/presets/` | Output sizes and colour grades |
 | `engine/tests/` | 510+ tests on synthetic media (`python run_tests.py [--fast]` inside `engine/tests`) |

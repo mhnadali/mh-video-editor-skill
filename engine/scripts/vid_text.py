@@ -36,6 +36,32 @@ LANGS = ("auto", "fa", "en")
 DIGITS = ("auto", "fa", "en")
 ALIGNS = ("center", "left", "right")
 
+# Reusable text presets (phase 10): a `template` on a text fills in position/style/animation defaults, so a caption or
+# lower-third is one word instead of three fields. Any explicit field on the text overrides the template.
+TEXT_TEMPLATES: dict[str, dict] = {
+    "title-card":  {"position": "title", "style": "title", "animation": "fade"},
+    "lower-third": {"position": "lower-third", "style": "caption", "animation": "slide-up"},
+    "caption":     {"position": "bottom", "style": "caption", "animation": "fade"},
+    "subtitle":    {"position": "bottom", "style": "subtitle", "animation": "none"},
+    "location":    {"position": "top", "style": "caption", "animation": "fade"},
+    "end-card":    {"position": "center", "style": "title", "animation": "pop"},
+}
+
+
+def apply_template(t: dict) -> dict:
+    """Expand a text's `template` into concrete defaults (explicit fields win). Unknown templates are left for validate()."""
+    name = t.get("template")
+    base = TEXT_TEMPLATES.get(name)
+    if not base:
+        return t
+    merged = dict(base)
+    merged.update({k: v for k, v in t.items() if k != "template"})
+    return merged
+
+
+def list_templates() -> list[tuple[str, str]]:
+    return [(k, f"{v['position']} / {v['style']} / {v['animation']}") for k, v in TEXT_TEMPLATES.items()]
+
 PERSIAN_DIGITS = str.maketrans("0123456789", "۰۱۲۳۴۵۶۷۸۹")
 ARABIC_INDIC = str.maketrans("٠١٢٣٤٥٦٧٨٩", "۰۱۲۳۴۵۶۷۸۹")
 
@@ -287,8 +313,12 @@ def validate(edl: dict) -> list[dict]:
     if not isinstance(texts, list):
         return [{"level": "error", "code": "texts", "msg": "texts must be a list"}]
     on_screen = 0.0
-    for i, t in enumerate(texts):
+    for i, t0 in enumerate(texts):
         where = f"text {i}"
+        if isinstance(t0, dict) and t0.get("template") is not None and t0["template"] not in TEXT_TEMPLATES:
+            add("error", "text-template", f"{where}: template '{t0['template']}' is unknown ({', '.join(TEXT_TEMPLATES)})")
+            continue
+        t = apply_template(t0) if isinstance(t0, dict) else t0
         if not isinstance(t, dict) or not str(t.get("text", "")).strip():
             add("error", "text-empty", f"{where}: needs non-empty 'text'")
             continue
@@ -360,6 +390,7 @@ def build_ass(edl: dict, width: int, height: int, work: str | os.PathLike) -> tu
     styles: dict[str, str] = {}
     events: list[str] = []
     for i, t in enumerate(texts):
+        t = apply_template(t)
         raw = str(t["text"])
         lang = t.get("lang", "auto")
         if lang == "auto":

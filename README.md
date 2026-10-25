@@ -1,6 +1,6 @@
 # M.H. Video Editor Skill
 
-![Version](https://img.shields.io/badge/version-0.5.0-blue)
+![Version](https://img.shields.io/badge/version-0.6.0-blue)
 ![Claude Code](https://img.shields.io/badge/Claude%20Code-skill%20%2B%20agent-orange)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
@@ -65,9 +65,24 @@ python engine/scripts/mh_video.py qa work/trip.mp4 --edl work/video.edl.json --s
 | [`docs/CLI.md`](docs/CLI.md) | Every command and argument (generated from the program) |
 | [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md) | Symptoms and fixes, environment variables |
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | Modules, timing model, per-shot filter chain, roadmap |
-| [`references/`](references/) | EDL format, colour, motion, text, formats, sound design, QA gate, pitfalls, effect budget |
-| [`docs/ROADMAP.md`](docs/ROADMAP.md) | State, the planned MP4 export / size-reduction layer with research and measurements, hand-off notes for continuing on another machine |
+| [`references/`](references/) | EDL format, colour, motion, text, formats, sound design, delivery, QA gate, pitfalls, effect budget |
+| [`references/delivery.md`](references/delivery.md) | Delivery presets, size/bitrate targeting, manifest, bundle |
+| [`docs/ROADMAP.md`](docs/ROADMAP.md) | State, the MP4 export / size-reduction layer with research and measurements, the post-0.5 roadmap, hand-off notes |
+| [`SUPPORT.md`](SUPPORT.md) | Platform / FFmpeg support matrix and how to get help |
+| [`docs/QA-PROTOCOL.md`](docs/QA-PROTOCOL.md) | Real-footage manual QA checklist |
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | How to change the engine safely |
+| [`docs/RELEASING.md`](docs/RELEASING.md) | Cutting a tagged release |
+
+## Quickstart (no footage needed)
+
+```bash
+python engine/scripts/mh_video.py doctor          # check FFmpeg; prints the hardware encoders it finds
+python engine/tools/make_sample.py /tmp/mhsample  # synthesise clips + a click track and plan an EDL
+python engine/scripts/mh_video.py render /tmp/mhsample/sample.edl.json --preview
+python engine/scripts/mh_video.py render /tmp/mhsample/sample.edl.json --delivery reels --qa
+```
+
+The sample project builds real clips and music with FFmpeg, so a first-time user can run the whole pipeline (probe, beats, plan, render, QA) before pointing the skill at their own footage.
 
 ## Install
 
@@ -87,11 +102,11 @@ python run_tests.py -k color --durations 10
 python coverage_report.py        # line coverage, standard library only (Python 3.12+)
 python -m unittest discover -p "test_*.py"   # plain unittest works too
 ```
-511 tests (96 % line coverage of the engine, measured with `coverage_report.py`). The end-to-end ones generate their own clips and music with FFmpeg (no footage needed); without FFmpeg they skip. They include a mutation fuzzer for malformed EDLs, a check that every filter the renderer uses is covered by `doctor`/`lint`, concurrency tests for the shared caches, a static Python 3.9 compatibility check, and a test that the generated CLI reference is current. A GitHub Actions workflow (`.github/workflows/mh-video-editor-skill.yml`) runs the suite on Linux and Windows.
+530 tests (96 % line coverage of the engine, measured with `coverage_report.py`). The end-to-end ones generate their own clips and music with FFmpeg (no footage needed); without FFmpeg they skip. They include a mutation fuzzer for malformed EDLs, a check that every filter the renderer uses is covered by `doctor`/`lint`, concurrency tests for the shared caches, a static Python 3.9 compatibility check, a no-network security invariant, delivery/size-targeting and reproducibility tests, and a test that the generated CLI reference is current. A GitHub Actions workflow (`.github/workflows/mh-video-editor-skill.yml`) runs the suite on Linux, macOS and Windows.
 
 ## Status
 
-Version 0.5.0 completes the five-phase plan (foundation, speed and accuracy, quality gate, new capabilities, hardening and documentation). It is tested on one Windows machine with FFmpeg 9.0.2 and synthetic media plus the author's own footage; other platforms rely on the continuous-integration run. Not for AI video generation or heavy compositing.
+Version 0.6.0 completes the original five-phase plan (foundation, speed and accuracy, quality gate, new capabilities, hardening and documentation) and the first post-0.5 arc: cross-environment trust, onboarding, a delivery/export layer, editing-quality tooling, broader hardware support, and reproducibility (see [`docs/ROADMAP.md`](docs/ROADMAP.md)). Developed on Windows with FFmpeg 9.0.2 and validated on synthetic media and the author's own footage; CI runs the full render suite on Linux, macOS and Windows, and the engine is now exercised on FFmpeg 6.x as well. Not for AI video generation or heavy compositing.
 
 ## License
 MIT, see [`LICENSE`](LICENSE) and [`NOTICE.md`](NOTICE.md). FFmpeg is installed separately.

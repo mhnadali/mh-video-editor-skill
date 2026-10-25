@@ -67,6 +67,9 @@ def cmd_doctor(a) -> int:
     nv = vid_render.nvenc_works()
     print(f"{'ok  ' if nv else 'info'} NVENC GPU encoding: "
           f"{'available (auto-selected for final renders)' if nv else 'not available, using libx264'}")
+    hw = vid_render.hw_encoders()
+    avail = [k for k, v in hw.items() if v]
+    print(f"info hardware H.264 encoders: {', '.join(avail) if avail else 'none detected (libx264 will be used)'}")
     font = vl.find_font()
     print(f"{'ok  ' if font else 'warn'} font for contact-sheet labels: {font or 'none found (sheets will be unlabeled)'}")
     print(f"info filter-graph file option: {vl.filter_script_flag()}")
@@ -97,7 +100,7 @@ def cmd_sheets(a) -> int:
 
 def cmd_beats(a) -> int:
     import vid_beats
-    res = vid_beats.analyse(a.audio, a.max_seconds)
+    res = vid_beats.analyse(a.audio, a.max_seconds, bpm=a.bpm, beats_per_bar=a.beats_per_bar, first_beat=a.first_beat)
     if a.out:
         vl.save_json(a.out, res)
     print(json.dumps({k: v for k, v in res.items() if k not in ("beats", "note")}, indent=2))
@@ -213,7 +216,8 @@ def cmd_lint(a) -> int:
 def cmd_render(a) -> int:
     import vid_render
     kw = dict(preview=a.preview, encoder=a.encoder, workdir=a.work, use_cache=not a.no_cache, force=a.force, workers=a.workers,
-              hwdecode=a.hwdecode, qa=a.qa)
+              hwdecode=a.hwdecode, qa=a.qa, delivery=a.delivery, target_size_mb=a.target_size_mb, bitrate=a.bitrate,
+              manifest=a.manifest, bundle=a.bundle, json_out=a.json)
     if a.all_formats:
         print(json.dumps(vid_render.render_formats(a.edl, None, **kw), indent=2))
     else:
@@ -291,6 +295,10 @@ def cmd_color(a) -> int:
 def cmd_text(a) -> int:
     import vid_text
     act = a.action
+    if act == "templates":
+        for name, desc in vid_text.list_templates():
+            print(f"{name:14} {desc}")
+        return 0
     if act == "fonts":
         for lang in ("fa", "en"):
             f = vid_text.pick_font(lang, None, True)
@@ -423,6 +431,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(fn=cmd_sheets)
     p = sub.add_parser("beats", help="beat grid, tempo alternatives, downbeats and the drop of a music file")
     p.add_argument("audio"); p.add_argument("--out"); p.add_argument("--max-seconds", type=float)
+    p.add_argument("--bpm", type=float, help="force this tempo instead of estimating it (tap-tempo / known BPM)")
+    p.add_argument("--beats-per-bar", type=int, default=4, help="beats per bar for the downbeat grid (4 = common time, 3 = waltz)")
+    p.add_argument("--first-beat", type=float, help="time in seconds of the first beat (overrides the detected phase)")
     p.set_defaults(fn=cmd_beats)
     p = sub.add_parser("score", help="measure sharpness, exposure and motion of every clip; best window; same-scene hashes")
     p.add_argument("--work", required=True); p.add_argument("--workers", type=int); p.add_argument("--limit", type=int)
@@ -461,13 +472,20 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(fn=cmd_lint)
     p = sub.add_parser("render", help="render the video (cached parts; --preview for half size)")
     p.add_argument("edl"); p.add_argument("--out"); p.add_argument("--preview", action="store_true")
-    p.add_argument("--encoder", default="auto", choices=["auto", "libx264", "nvenc"]); p.add_argument("--work")
+    p.add_argument("--encoder", default="auto", choices=["auto", "libx264", "nvenc", "videotoolbox", "qsv"]); p.add_argument("--work")
     p.add_argument("--no-cache", action="store_true"); p.add_argument("--force", action="store_true", help="render despite lint errors")
     p.add_argument("--workers", type=int, help="parallel shot renders (default: min(4, CPUs))")
     p.add_argument("--hwdecode", default="auto", choices=["auto", "none"], help="GPU decoding of source clips (auto = CUDA when available)")
     p.add_argument("--qa", action="store_true", help="run the quality gate on the result (final renders)")
     p.add_argument("--format", help="render in another format preset, e.g. youtube-16x9 or square-1x1 (reframed with blur-fill)")
     p.add_argument("--all-formats", action="store_true", help="render reels-9x16, youtube-16x9 and square-1x1 from the same EDL")
+    p.add_argument("--delivery", choices=["reels", "tiktok", "shorts", "stories", "youtube", "square"],
+                   help="platform delivery preset (sets the format, loudness target and container for that platform)")
+    p.add_argument("--target-size-mb", type=float, help="aim for this output file size in MB (two-pass bitrate on libx264)")
+    p.add_argument("--bitrate", type=int, help="target video bitrate in kbit/s (overrides constant-quality encoding)")
+    p.add_argument("--manifest", action="store_true", help="write a reproducibility manifest (versions, hashes) next to the output")
+    p.add_argument("--bundle", action="store_true", help="zip the EDL, brief, beats and scores for hand-off (no media)")
+    p.add_argument("--json", help="also write the render result (paths, sizes, verdict) to this JSON file")
     p.set_defaults(fn=cmd_render)
     p = sub.add_parser("qa", help="quality gate on a rendered video: defects, loudness, cut timing, effect audit")
     p.add_argument("video"); p.add_argument("--edl"); p.add_argument("--scores", help="work folder with scores.json (audits clip quality)")
@@ -490,6 +508,7 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("text", help="on-screen text (Persian right-to-left supported)")
     tsub = p.add_subparsers(dest="action", required=True)
     tsub.add_parser("fonts", help="list the fonts the engine will use")
+    tsub.add_parser("templates", help="list the reusable text templates (title-card, lower-third, caption ...)")
     q = tsub.add_parser("import-srt", help="append the cues of an SRT file to the EDL as texts"); q.add_argument("edl"); q.add_argument("srt"); q.add_argument("--position", default="bottom")
     q.add_argument("--style", default="caption"); q.add_argument("--animation", default="fade")
     q = tsub.add_parser("preview", help="draw the EDL texts on a frame (check Persian shaping and placement)"); q.add_argument("edl"); q.add_argument("--out", required=True); q.add_argument("--at", type=float, default=1.0)

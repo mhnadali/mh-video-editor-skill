@@ -152,9 +152,12 @@ def plan(clips: list[dict], beats: dict, *, name: str = "video", music: str | No
             for j, cut in enumerate(lay["cuts"], start=1):
                 if abs(cut - target) < 0.02:
                     drop_cut = j
+    music_val = None
+    if music:
+        music_val = [vl.ffp(m) for m in music] if isinstance(music, list) else vl.ffp(music)
     edl = {
         "version": 1,
-        "project": {"name": name, "preset": preset, "duration": round(duration, 4), "music": vl.ffp(music) if music else None},
+        "project": {"name": name, "preset": preset, "duration": round(duration, 4), "music": music_val},
         "beats": {"t0": t0, "period": round(period, 5)},
         "style": {"grade": grade},
         "shots": shots,

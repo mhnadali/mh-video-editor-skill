@@ -1,0 +1,69 @@
+# Roadmap and state
+
+This document is the honest state of the project and where it is going. It also carries the research and measurements
+behind the MP4 export / size-reduction layer, and hand-off notes for continuing on another machine.
+
+## State
+
+Version **0.6.0**. The original five-phase plan (foundation; speed and accuracy; the automated QA gate; new
+capabilities; hardening, documentation and CI) is complete, and the first post-v0.5 arc has landed: cross-environment
+trust, onboarding, a delivery/export layer, editing-quality tooling, more capabilities, broader hardware support, and
+reproducibility. The engine is standard-library Python over FFmpeg, with 500+ tests on synthetic media.
+
+See [`CHANGELOG.md`](../CHANGELOG.md) for what changed in each version and [`SUPPORT.md`](../SUPPORT.md) for the
+platform / FFmpeg support matrix.
+
+## Export and size-reduction layer (implemented in 0.6.0)
+
+Platforms re-encode whatever you upload, so the goal is not to out-smart them but to hand them a clean, correctly
+shaped, correctly loud file that survives the re-encode and respects their size limits.
+
+- **Delivery presets** (`render --delivery reels|tiktok|shorts|stories|youtube|square`) set the output format, the
+  integrated-loudness target (−14 LUFS, the platform norm) and the container (`yuv420p`, `+faststart`).
+- **Size targeting** (`render --target-size-mb N`) computes a video bitrate from the duration and the audio bitrate and
+  uses **two-pass** libx264 (or VBR on a hardware encoder). A size target is treated as an **upper bound**: busy footage
+  fills it, flat footage undershoots, which is fine.
+- **Bitrate** (`render --bitrate kbps`) sets the video bitrate directly.
+- Verified by a delivery check (size within tolerance, aspect, container) in the render result.
+
+### Measurements (synthetic 6 s, 8 shots, 180×320, libx264 on the CI Linux box)
+
+| Request | Result |
+|---|---|
+| `--target-size-mb 1.5` (two-pass) | file ≤ target; flat test footage undershoots, as expected |
+| `--delivery reels` | 9:16, −14 LUFS, faststart |
+| default (constant quality) | unchanged from 0.5.x |
+
+A megabyte here is 8·1000·1000 bits (how platforms quote limits); 2% is reserved for container overhead, and a target
+that leaves less than 120 kbit/s for the picture is refused with a clear message.
+
+## Post-0.5 roadmap (phases 6–12)
+
+- **6 — Cross-environment trust.** CI now runs the full render suite on Linux, macOS and Windows; `doctor` reports the
+  working hardware encoders; a robustness fix handles FFmpeg builds (6.x) that print `-nan` from `blurdetect`. Remaining:
+  a first green CI run observed on GitHub, branch protection, and an FFmpeg-version matrix in CI.
+- **7 — Onboarding & distribution.** A zero-footage sample project (`engine/tools/make_sample.py`), a quickstart in the
+  README, and a tag-driven release workflow. Remaining: the first tagged GitHub Release.
+- **8 — Export & delivery.** Done (above).
+- **9 — Editing intelligence.** An evaluation harness (`engine/tools/eval_quality.py`) reports beat error, pick diversity
+  and restraint on a fixed synthetic corpus, so changes are judged by numbers. `beats --bpm/--first-beat/--beats-per-bar`
+  allow tap-tempo and non-4/4 grids. Next: combine more scoring cues; section-aware pacing.
+- **10 — New capabilities.** Reusable text templates (`text templates`), three more looks, and multi-track music
+  (`project.music` as a list of sections, concatenated). Next: more title/caption animations; per-platform mastering
+  curves beyond loudness.
+- **11 — Performance & scale.** Hardware-encoder detection (NVENC, VideoToolbox, QSV; VAAPI reported), a cache
+  garbage-collector (`vid_deliver.gc_cache`), and per-shot progress logging. Next: resumable scoring for very large
+  libraries; measured throughput on 500+ clips.
+- **12 — Reproducibility & automation.** A render manifest (`--manifest`: engine/FFmpeg versions, EDL and output hashes,
+  input sizes), a project bundle (`--bundle`: EDL + brief + beats + scores, no media), and `--json` result output.
+
+## Hand-off notes (continuing on another machine)
+- Clone, then `python engine/scripts/mh_video.py doctor`. Install FFmpeg if it is missing (`winget install Gyan.FFmpeg`
+  on Windows, `brew install ffmpeg` on macOS, `apt install ffmpeg` on Linux).
+- `cd engine/tests && python run_tests.py --fast` finishes in about two minutes without the slow renders; the full suite
+  needs FFmpeg and runs the end-to-end renders on synthetic media (no footage required).
+- The reproducibility manifest (`render --manifest`) records the FFmpeg version and output hash, so you can tell whether
+  another machine produced the same render. A project bundle (`render --bundle`) carries the EDL and its sidecars between
+  machines; the scratch files that used to get lost now travel with the edit.
+- Everything reusable lives in this repository. Intermediate files in a work folder are disposable (and
+  `vid_deliver.gc_cache` reclaims them).

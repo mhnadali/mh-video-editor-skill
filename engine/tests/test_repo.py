@@ -107,9 +107,10 @@ class Code(unittest.TestCase):
             self.assertNotIn(b"\r\n", p.read_bytes(), p.name)
 
     def test_no_third_party_imports(self):
-        std = {"__future__", "argparse", "array", "atexit", "compileall", "concurrent", "copy", "csv", "glob", "hashlib",
-               "json", "math", "os", "pathlib", "random", "re", "shutil", "statistics", "struct", "subprocess", "sys", "tempfile",
-               "time", "unittest", "wave", "typing", "bisect", "unicodedata", "ast", "threading"}
+        std = {"__future__", "argparse", "array", "atexit", "compileall", "concurrent", "copy", "csv", "datetime", "glob",
+               "hashlib", "json", "math", "os", "pathlib", "platform", "random", "re", "shutil", "statistics", "struct",
+               "subprocess", "sys", "tempfile", "time", "unittest", "wave", "typing", "bisect", "unicodedata", "ast",
+               "threading", "zipfile"}
         import ast
         local = {p.stem for p in (ROOT / "engine" / "scripts").glob("*.py")} | {"helpers"}
         for p in (ROOT / "engine" / "scripts").glob("*.py"):

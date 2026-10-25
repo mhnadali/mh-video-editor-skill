@@ -33,9 +33,11 @@ def _read_metadata(path: Path, keys: set[str]) -> dict[str, float]:
     vals: dict[str, list[float]] = {}
     if path.exists():
         for line in path.read_text(errors="replace").splitlines():
-            m = re.match(r"lavfi\.(?:signalstats\.)?(\w+)=([\d.eE+-]+)", line.strip())
+            m = re.match(r"lavfi\.(?:signalstats\.)?(\w+)=(\S+)", line.strip())
             if m and m.group(1) in keys:
-                vals.setdefault(m.group(1), []).append(float(m.group(2)))
+                v = vl.parse_float(m.group(2))
+                if v is not None:
+                    vals.setdefault(m.group(1), []).append(v)
     return {k: sum(v) / len(v) for k, v in vals.items()}
 
 
