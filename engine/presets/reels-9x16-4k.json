@@ -1,0 +1,5 @@
+{
+  "name": "reels-9x16-4k",
+  "description": "Vertical short-form video at the resolution of 4K phone footage (2160x3840). Use when the sources are 4K and quality matters most.",
+  "width": 2160, "height": 3840, "fps": 30
+}

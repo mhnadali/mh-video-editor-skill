@@ -11,7 +11,7 @@ Plain JSON. `plan` writes it; you may edit it by hand. Example: `engine/examples
     "fade_in": 0.4, "fade_out": 0.8, "music_fade_in": 0.3, "music_fade_out": 0.9
   },
   "beats": { "t0": 3.2, "period": 0.6537, "drop_beat": 18 },
-  "style": { "grade": "warm-desert", "zoom": 0.05, "drop_flash": true, "end_flare": true,
+  "style": { "grade": "neutral", "zoom": 0.05, "drop_flash": true, "end_flare": true,
              "riser": true, "boom": true, "loudness": -14 },
   "shots": [
     { "clip": "D:/footage/a.MOV", "span": [0, 1.6] },
@@ -59,7 +59,7 @@ Why each boundary is the kind of cut it is, written by `cuts --write` / `plan --
 ## style
 | Key | Default | Meaning |
 |---|---|---|
-| grade | warm-desert | a look name (`color looks`), an object (`{"look": ..., "strength": ...}` or `{"lut": "x.cube"}`), a legacy preset (`engine/presets/*.json`) or a raw FFmpeg filter string starting with `eq=`/`colorbalance`/`curves`/`lut3d` |
+| grade | neutral | a look name (`color looks`), an object (`{"look": ..., "strength": ...}` or `{"lut": "x.cube"}`), a legacy preset (`engine/presets/*.json`) or a raw FFmpeg filter string starting with `eq=`/`colorbalance`/`curves`/`lut3d` |
 | zoom | 0.05 | total push-in per shot (0 = off) |
 | drop_flash | true | white fade + RGB split on the drop |
 | end_flare | true | warm sun flare at the end (`flare_time` seconds to move it) |

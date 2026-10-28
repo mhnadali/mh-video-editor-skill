@@ -173,7 +173,7 @@ mh_video plan [-h] --beats BEATS --clips CLIPS --out OUT [--name NAME] [--music 
 | `--duration DURATION` |  | override the video duration in seconds |
 | `--period PERIOD` |  | override the beat period in seconds |
 | `--intro-shots INTRO_SHOTS` | default `2` | shots before the beat grid starts |
-| `--grade GRADE` | default `warm-desert` | look or preset name |
+| `--grade GRADE` | default `neutral` | look or preset name |
 | `--no-transitions` |  | hard cuts only |
 | `--bar-align` |  | start the body on a downbeat (needs bar_phase in beats.json) |
 | `--body-start BODY_START` |  | seconds where the beat-by-beat body starts (default about 11 percent in); use the music's drop time to land the flash on the first body cut |
@@ -219,7 +219,7 @@ mh_video lint [-h] [--no-files] edl
 Render the video (cached parts; --preview for half size).
 
 ```
-mh_video render [-h] [--out OUT] [--preview] [--encoder {auto,libx264,nvenc,videotoolbox,qsv}] [--work WORK] [--no-cache] [--force] [--workers WORKERS] [--hwdecode {auto,none}] [--qa] [--format FORMAT] [--all-formats] [--delivery {reels,tiktok,shorts,stories,youtube,square}] [--target-size-mb TARGET_SIZE_MB] [--bitrate BITRATE] [--manifest] [--bundle] [--json JSON] edl
+mh_video render [-h] [--out OUT] [--preview] [--encoder {auto,libx264,nvenc,videotoolbox,qsv}] [--work WORK] [--no-cache] [--force] [--workers WORKERS] [--hwdecode {auto,none}] [--qa] [--format FORMAT] [--all-formats] [--delivery {reels,tiktok,shorts,stories,youtube,square}] [--target-size-mb TARGET_SIZE_MB] [--bitrate BITRATE] [--manifest] [--bundle] [--json JSON] [--quality {standard,high,max}] edl
 ```
 
 | Argument | Required / default | Meaning |
@@ -242,6 +242,7 @@ mh_video render [-h] [--out OUT] [--preview] [--encoder {auto,libx264,nvenc,vide
 | `--manifest` |  | write a reproducibility manifest (versions, hashes) next to the output |
 | `--bundle` |  | zip the EDL, brief, beats and scores for hand-off (no media) |
 | `--json JSON` |  | also write the render result (paths, sizes, verdict) to this JSON file |
+| `--quality QUALITY` | one of `standard`, `high`, `max` | constant-quality level of a final render: high (default) is close to the source, max is near lossless, standard is lighter; previews are always standard |
 
 ## `qa`
 

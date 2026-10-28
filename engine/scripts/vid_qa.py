@@ -40,8 +40,9 @@ FREEZE_DIFF = 0.02
 LOUDNESS_TOLERANCE = (-3.0, 2.0)          # LU around the target
 TRUE_PEAK_WARN = -1.0
 TRUE_PEAK_ERROR = -0.1
-MAX_MB_PER_SECOND = 6.0
+MAX_MB_PER_SECOND = 6.0           # per 1080p-sized picture: the limits below scale with the number of pixels
 MAX_FILE_MB = 400.0
+HD_PIXELS = 1080 * 1920
 EXPOSURE_JUMP = 45.0            # luma levels between the 4 frames before and after a hard cut
 EXPOSURE_JUMP_SHARE = 0.30      # warn when more than this share of the cuts jump that much (v4 had 14%, median jump 12)
 CUT_SCENE_MIN = 0.12            # scene score a hard cut normally exceeds
@@ -342,9 +343,11 @@ def check_structure(info: dict, p: dict | None, size_bytes: int) -> list[dict]:
     out: list[dict] = []
     mb = size_bytes / 1e6
     per_sec = mb / max(info["duration"], 0.1)
-    if mb > MAX_FILE_MB:
-        out.append({"id": "file-size", "level": "error", "msg": f"{mb:.0f} MB is above {MAX_FILE_MB:.0f} MB (grain/noise or a wrong quality setting)"})
-    elif per_sec > MAX_MB_PER_SECOND:
+    scale = max(1.0, (info.get("width", 0) * info.get("height", 0)) / HD_PIXELS)       # a 4K picture is allowed 4x the bytes
+    max_mb, max_per_sec = MAX_FILE_MB * scale, MAX_MB_PER_SECOND * scale
+    if mb > max_mb:
+        out.append({"id": "file-size", "level": "error", "msg": f"{mb:.0f} MB is above {max_mb:.0f} MB (grain/noise or a wrong quality setting)"})
+    elif per_sec > max_per_sec:
         out.append({"id": "file-size", "level": "warn", "msg": f"{per_sec:.1f} MB per second ({mb:.0f} MB): unusually heavy for a reel"})
     else:
         out.append({"id": "file-size", "level": "ok", "msg": f"{mb:.1f} MB ({per_sec:.2f} MB/s)"})

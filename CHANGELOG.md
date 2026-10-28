@@ -2,6 +2,16 @@
 
 All notable changes to this project. Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [SemVer](https://semver.org/).
 
+## [0.14.0] - 2026-10-28 (quality, natural colour, no text, speed: from the first reel's review)
+### Changed
+- **Final renders are `--quality high` by default** (`standard` | `high` | `max`): the cached parts are encoded at CRF 12 and the assembled video at CRF 16 with the medium preset (was 16 and 18, slow): about 70 Mbps at 4K, while the sources are 43-46 Mbps, audio AAC 256k, so the second encode no longer compounds the first; Lanczos resampling for the cover reframe and the zoom. Previews stay light. 4K presets `reels-9x16-4k` (2160x3840) and `youtube-16x9-4k` for 4K sources (1080p output of 4K footage was judged "very compressed").
+- **Natural colour by default:** `style.grade` and `plan --grade` default to `neutral`. The skill and the agent no longer use a warm look or the end flare unless asked, and warn against neutralising sunsets and firelight with `color plan --wb`.
+- **No on-screen text by default:** discovery no longer asks about text, the agent adds none; text stays available only when the user asks for it unprompted.
+
+### Faster analysis (same results)
+- `score` decodes each window once: exposure, motion, sharpness, the 9x8 hash frame and the tiny gray and RGB frames for the editorial and colour measurements all come from the same FFmpeg pass (it used to decode the best window three more times). 40 real 4K clips: 91 s -> 42 s (2.2x) with identical best windows and quality, the same shot size on 37 of 40 clips, hue within 0.002; decoder threads capped at 2 with 8 workers.
+- Contact sheets decode only key frames after the seek: 4x faster (60 clips: 13.9 s -> 3.5 s).
+
 ## [0.13.0] - 2026-10-28 (first real trip: capture time, chronological inventory, fixes found on real footage)
 ### Added
 - **Capture time:** `probe` reads the device and the capture time (Apple local time with its offset, or the container's UTC time), builds one comparable timeline across cameras, writes `timeline.csv` (gap to the previous clip) and **numbers the inventory in capture order**. `--utc-offset` and repeatable `--clock-shift DEVICE=MINUTES` correct a camera with a wrong clock or time zone (found on a trip: the Osmo Pocket 3 was 30 minutes off; the clips of the same breakfast only interleaved once corrected).

@@ -247,7 +247,7 @@ def cmd_render(a) -> int:
     import vid_render
     kw = dict(preview=a.preview, encoder=a.encoder, workdir=a.work, use_cache=not a.no_cache, force=a.force, workers=a.workers,
               hwdecode=a.hwdecode, qa=a.qa, delivery=a.delivery, target_size_mb=a.target_size_mb, bitrate=a.bitrate,
-              manifest=a.manifest, bundle=a.bundle, json_out=a.json)
+              manifest=a.manifest, bundle=a.bundle, json_out=a.json, quality=a.quality)
     if a.all_formats:
         print(json.dumps(vid_render.render_formats(a.edl, None, **kw), indent=2))
     else:
@@ -527,7 +527,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--beats", required=True); p.add_argument("--clips", required=True); p.add_argument("--out", required=True)
     p.add_argument("--name", default="video"); p.add_argument("--music"); p.add_argument("--preset", default="reels-9x16")
     p.add_argument("--duration", type=float); p.add_argument("--period", type=float)
-    p.add_argument("--intro-shots", type=int, default=2); p.add_argument("--grade", default="warm-desert")
+    p.add_argument("--intro-shots", type=int, default=2); p.add_argument("--grade", default="neutral")
     p.add_argument("--no-transitions", action="store_true")
     p.add_argument("--bar-align", action="store_true", help="start the body on a downbeat (needs bar_phase in beats.json)")
     p.add_argument("--body-start", type=float, help="seconds where the beat-by-beat body starts (default about 11 percent in); use the music's drop time to land the flash on the first body cut")
@@ -566,6 +566,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--manifest", action="store_true", help="write a reproducibility manifest (versions, hashes) next to the output")
     p.add_argument("--bundle", action="store_true", help="zip the EDL, brief, beats and scores for hand-off (no media)")
     p.add_argument("--json", help="also write the render result (paths, sizes, verdict) to this JSON file")
+    p.add_argument("--quality", choices=["standard", "high", "max"],
+                   help="constant-quality level of a final render: high (default) is close to the source, max is near lossless, standard is lighter; previews are always standard")
     p.set_defaults(fn=cmd_render)
     p = sub.add_parser("qa", help="quality gate on a rendered video: defects, loudness, cut timing, effect audit")
     p.add_argument("video"); p.add_argument("--edl"); p.add_argument("--scores", help="work folder with scores.json (audits clip quality)")

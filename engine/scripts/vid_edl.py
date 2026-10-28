@@ -17,7 +17,7 @@ MIN_SHOT_FRAMES = 8
 MIN_OVERLAP, MAX_OVERLAP = 2, 24     # frames a transition may overlap (EDL `transition_frames`); even numbers only
 
 DEFAULT_STYLE = {
-    "grade": "warm-desert",   # preset name or path (engine/presets/*.json)
+    "grade": "neutral",       # a look from `color looks` (neutral = no creative change), a preset name or a path
     "zoom": 0.05,             # gentle push-in per shot (0 = off)
     "drop_flash": True,       # one white flash + RGB split on the drop (needs beats.drop_beat)
     "end_flare": True,        # one warm sun flare at the ending
