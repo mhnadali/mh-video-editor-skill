@@ -45,8 +45,13 @@ def _thumb(rec: dict, out: Path, size: int, pos: float, font: str | None) -> boo
     if font:
         vf += (f",drawtext=text='{rec['index']}':fontfile='{vl.filter_escape_path(font)}':fontsize={max(14, size // 8)}:"
                "fontcolor=yellow:borderw=2:bordercolor=black:x=4:y=4")
-    r = vl.run([vl.find_ffmpeg()["ffmpeg"], "-v", "error", "-y", "-ss", f"{t:.2f}", "-i", rec["path"],
-                "-frames:v", "1", "-vf", vf, "-q:v", "4", out], check=False)
+    # nokey: decode only key frames after the seek (the nearest one is as good as the exact frame for a thumbnail, and
+    # 4 times faster on long-GOP 4K files); if that yields nothing (a clip without usable key frames) decode normally
+    base = [vl.find_ffmpeg()["ffmpeg"], "-v", "error", "-y"]
+    tail = ["-ss", f"{t:.2f}", "-i", rec["path"], "-frames:v", "1", "-vf", vf, "-q:v", "4", out]
+    r = vl.run(base + ["-skip_frame", "nokey", "-threads", "2"] + tail, check=False)
+    if r.returncode != 0 or not out.is_file() or out.stat().st_size < 200:
+        r = vl.run(base + tail, check=False)
     return r.returncode == 0 and out.is_file()
 
 
@@ -71,7 +76,7 @@ def clip_sheets(records: list[dict], outdir: str | os.PathLike, size: int = 200,
             _blank(p, size)
         return p
 
-    with ThreadPoolExecutor(workers or vl.cpu_workers(6)) as ex:
+    with ThreadPoolExecutor(workers or vl.cpu_workers(8)) as ex:
         idx_files = list(ex.map(work, records))
     per = cols * rows
     sheets = []

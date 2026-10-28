@@ -1,5 +1,7 @@
 # Colour correction and grading
 
+**Default: natural colour.** `style.grade` is `neutral` (no creative change) and `style.correct` is added only for a shot with a real problem. Creative looks, and the warm end flare, are used only when the user asks for them; `desert-gold` on a desert trip was judged "far too warm". Do not use `color plan --wb` to neutralise sunsets, firelight or night scenes: they are warm on purpose.
+
 Do it in this order, every time. A grade cannot rescue a shot that is technically wrong, and "fixing" exposure with a look makes every shot need a different grade.
 
 ```

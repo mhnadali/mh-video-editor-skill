@@ -225,10 +225,40 @@ def parse_probe(data: dict) -> dict:
         info.update(width=w, height=h, rotation=rot, fps=_rate(v.get("avg_frame_rate")) or _rate(v.get("r_frame_rate")),
                     codec=v.get("codec_name"), pix_fmt=v.get("pix_fmt"), color_transfer=trc,
                     hdr=trc in ("arib-std-b67", "smpte2084"), nb_frames=int(v.get("nb_frames") or 0))
+    tags = {k.lower(): str(val) for k, val in {**((v or {}).get("tags") or {}), **(fmt.get("tags") or {})}.items()}
+    info["created_utc"] = parse_utc(tags.get("creation_time"))
+    info["created_local"] = tags.get("com.apple.quicktime.creationdate")      # iPhone: local wall-clock time with its offset
+    info["device"] = (tags.get("com.apple.quicktime.model") or tags.get("encoder") or "").strip() or None
     if a:
         info.update(audio_codec=a.get("codec_name"), sample_rate=int(a.get("sample_rate") or 0),
                     channels=int(a.get("channels") or 0))
     return info
+
+
+def parse_utc(text: str | None) -> float | None:
+    """Epoch seconds from a container `creation_time` such as 2026-10-08T03:29:26.000000Z; None if absent or the zero date."""
+    if not text:
+        return None
+    import datetime as dt
+    try:
+        d = dt.datetime.strptime(text.strip()[:19], "%Y-%m-%dT%H:%M:%S").replace(tzinfo=dt.timezone.utc)
+    except ValueError:
+        return None
+    return d.timestamp() if d.year >= 2000 else None
+
+
+def parse_local(text: str | None) -> tuple[str, int] | None:
+    """('YYYY-MM-DD HH:MM:SS', offset_minutes) from an Apple creationdate like 2026-10-08T05:33:23+0330; None if unparseable."""
+    if not text:
+        return None
+    import re
+    m = re.match(r"(\d{4})-(\d\d)-(\d\d)T(\d\d):(\d\d):(\d\d)([+-])(\d\d):?(\d\d)?", text.strip())
+    if not m:
+        return None
+    off = int(m.group(8)) * 60 + int(m.group(9) or 0)
+    if m.group(7) == "-":
+        off = -off
+    return f"{m.group(1)}-{m.group(2)}-{m.group(3)} {m.group(4)}:{m.group(5)}:{m.group(6)}", off
 
 
 _PROBE_CACHE: dict[tuple, dict] = {}

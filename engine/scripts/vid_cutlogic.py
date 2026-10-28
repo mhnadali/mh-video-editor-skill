@@ -20,6 +20,9 @@ import vidlib as vl
 MOVE_MIN = 1.0                  # motion magnitude (analysis pixels) that counts as "moving"
 LATERAL_MIN = 1.2               # horizontal component that counts as a clear direction (== editorial SCREEN_DIR_MIN)
 FOCUS_NEAR = 0.15               # distance between points of interest for a graphic match
+FOCUS_OFF_CENTRE = 0.12         # a match only says something when at least one point of interest is off the middle
+COMMON_HUE_SHARE = 0.6          # when this share of the shots has the same dominant colour, a colour match means nothing
+COMMON_HUE_NEAR = 0.08
 SAME_SCENE_BITS = 10            # perceptual-hash Hamming distance for "the same scene"
 BRIGHT_JUMP = 70                # brightness (0-255) jump for a contrast cut
 ENERGY_JUMP = 55                # energy (0-100) jump for a contrast cut
@@ -93,6 +96,19 @@ def shot_features(score: Optional[dict], note: Optional[dict]) -> dict:
     energy = MOOD_ENERGY.get(n.get("mood"))
     f["energy"] = energy if energy is not None else s.get("energy")
     return f
+
+
+def override_score(score: Optional[dict], note: Optional[dict]) -> dict:
+    """A score entry with the agent's shot-notes laid over it (shot size, movement), keyed like the score, for the QA gate."""
+    out = dict(score or {})
+    n = note or {}
+    size = n.get("shot_size")
+    if size:
+        out["shot_size"] = "close" if size == "detail" else size
+    f = shot_features(score, note)
+    if n.get("motion_dir"):
+        out["motion_dx"], out["motion_dy"], out["motion_mag"] = f["dx"], f["dy"], f["mag"]
+    return out
 
 
 def lateral(f: dict) -> int:
@@ -195,12 +211,13 @@ def classify(a: dict, b: dict, ctx: dict) -> dict:
     fa, fb = a.get("focus"), b.get("focus")
     if fa and fb and ham is not None and ham > SAME_SCENE_BITS:
         dist = ((fa[0] - fb[0]) ** 2 + (fa[1] - fb[1]) ** 2) ** 0.5
+        off = max(((f[0] - 0.5) ** 2 + (f[1] - 0.5) ** 2) ** 0.5 for f in (fa, fb))
         ra, rb = SIZE_RANK.get(a.get("size")), SIZE_RANK.get(b.get("size"))
-        if dist <= FOCUS_NEAR and (ra is None or rb is None or abs(ra - rb) <= 1):
+        if dist <= FOCUS_NEAR and off >= FOCUS_OFF_CENTRE and (ra is None or rb is None or abs(ra - rb) <= 1):
             return {"type": "graphic-match", "transition": None, "confidence": 0.6,
                     "why": "the point of interest sits in the same place in both shots: the eye does not have to move"}
     ha, hb = a.get("hue"), b.get("hue")
-    if ha is not None and hb is not None and ham is not None and ham > SAME_SCENE_BITS and             (a.get("colourfulness") or 0) >= 0.15 and (b.get("colourfulness") or 0) >= 0.15:
+    if ctx.get("colour_informative", True) and ha is not None and hb is not None and ham is not None and ham > SAME_SCENE_BITS and             (a.get("colourfulness") or 0) >= 0.15 and (b.get("colourfulness") or 0) >= 0.15:
         hd = abs(ha - hb) % 1.0
         if min(hd, 1.0 - hd) <= 0.06:
             return {"type": "colour-match", "transition": None, "confidence": 0.5,
@@ -355,6 +372,19 @@ def edl_features(edl: dict, scores: dict, notes: Optional[dict] = None) -> list:
     return feats
 
 
+def colour_is_informative(feats: list) -> bool:
+    """False when most shots share one dominant colour (a desert, a snowfield): then a 'colour match' is true of almost
+    every cut and says nothing."""
+    hues = [f["hue"] for f in feats if f.get("hue") is not None]
+    if len(hues) < 4:
+        return True
+    best = 0
+    for h in hues:
+        near = sum(1 for g in hues if min(abs(h - g) % 1.0, 1.0 - abs(h - g) % 1.0) <= COMMON_HUE_NEAR)
+        best = max(best, near)
+    return best / len(hues) < COMMON_HUE_SHARE
+
+
 def analyse(edl: dict, scores: dict, beats: Optional[dict] = None, notes: Optional[dict] = None,
             keep_existing: bool = False) -> list:
     """Decisions for boundaries 1..n-1 of `edl`: a list of {j, type, why, confidence, transition}.
@@ -364,12 +394,13 @@ def analyse(edl: dict, scores: dict, beats: Optional[dict] = None, notes: Option
     bounds = ve.timeline(edl)
     fps = ve.project(edl)["fps"]
     feats = edl_features(edl, scores, notes)
+    colour_ok = colour_is_informative(feats)
     drop_j = ve.drop_boundary(edl, bounds) if ve.merged_style(edl)["drop_flash"] else None
     period = float((edl.get("beats") or {}).get("period") or (beats or {}).get("period") or 0.5)
     out = []
     for j in range(1, n):
         ctx = {"is_drop": j == drop_j, "is_last": j == n - 1 and n >= 4,
-               "section": section_context(beats, bounds[j] / fps, period)}
+               "section": section_context(beats, bounds[j] / fps, period), "colour_informative": colour_ok}
         d = classify(feats[j - 1], feats[j], ctx)
         d["j"] = j
         out.append(d)

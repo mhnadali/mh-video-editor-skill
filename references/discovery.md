@@ -9,7 +9,7 @@ First, silently: run `doctor`, `probe` the footage folder and `beats` the music 
 1. **Format**: vertical 9:16 (Reels/Shorts/TikTok/Stories), landscape 16:9 (YouTube/TV), square 1:1, or several? *Default: what most clips already are.*
 2. **Length**: exact seconds, or "match the music"? If the user gives a music file with a length, that length wins.
 3. **Music**: path to the file (the engine never downloads music). No music -> silent edit with natural sound off; ask whether to keep clip sound.
-4. **Text on screen**: none / title+end card / captions. Language and wording. Persian right-to-left text is supported (`references/text-persian.md`); preview it with `text preview` before rendering.
+4. **On-screen text: do NOT ask and do NOT add any.** The default is a video without text. Only if the user themselves asks for a title or captions in their own words, read `references/text-persian.md` and preview it with `text preview` first.
 5. **Mood and pace**: fast and energetic / calm cinematic / mixed. *Default: cut on main beats; hard cuts for roughly half the cut points.*
 6. **Content rules**: what must appear, what must NOT appear (e.g. no food, no faces, no logos), any clip the user already loves.
 7. **Effects**: say the default out loud: "a few effects only (gentle zoom, one flash on the drop, one sun flare at the end) and varied transitions". Ask if they want more or less. Never stack effects on every beat.
@@ -28,7 +28,7 @@ Status: CONFIRMED (<date>, confirmed by <user>)
 - Format: <9:16 | 16:9 | 1:1>, <fps> fps
 - Duration: <s> s
 - Pace and mood: <...>
-- On-screen text: <none | ...>
+- On-screen text: none (never asked; added only if the user asks for it unprompted)
 - Must include: <...>
 - Must NOT include: <...>
 - Locked clips (do not change): <...>

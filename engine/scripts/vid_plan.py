@@ -195,7 +195,7 @@ def auto_transitions(n_shots: int, drop_cut: int | None, share: float = 0.45) ->
 
 def plan(clips: list[dict], beats: dict, *, name: str = "video", music: str | None = None, preset: str = "reels-9x16",
          duration: float | None = None, intro_shots: int = 2, body_start: float | None = None,
-         period: float | None = None, grade: str = "warm-desert", transitions: bool = True,
+         period: float | None = None, grade: str = "neutral", transitions: bool = True,
          align_bars: bool = False, pacing: str | None = None, follow_tempo: bool = False) -> dict:
     duration = float(duration or beats["duration"])
     period = float(period or beats["period"])
@@ -223,7 +223,7 @@ def plan(clips: list[dict], beats: dict, *, name: str = "video", music: str | No
     if beats.get("drop_beat") is not None:
         drop_abs_t = phase_t + beats["drop_beat"] * period
         db = round((drop_abs_t - t0) / period)
-        if db >= 1:
+        if db >= 0:                                  # 0 = the drop opens the body: the flash lands on the first body cut
             drop_beat = int(db)
             target = t0 + db * period
             for j, cut in enumerate(lay["cuts"], start=1):

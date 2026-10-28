@@ -23,11 +23,25 @@ import vidlib as vl
 WINDOW = 1.0
 POSITIONS = (0.25, 0.5, 0.75)
 ANALYSIS_WIDTH = 480
+DECODE_THREADS = 2          # many small decodes in parallel beat a few wide ones (measured: 15 % faster than the default)
 
-_GRAPH = ("fps=10,scale={w}:-2,{tm}format=yuv420p,split=3[a][b][c];"
+# One decode per window gives everything: exposure, motion and sharpness (metadata files) plus the tiny frames the
+# editorial measurements and the picture hash need (raw files): 6 gray 48x27 frames, 3 RGB 16x9 frames, one 9x8 frame.
+_GRAPH = ("fps=10,scale={w}:-2,{tm}format=yuv420p,split=6[a][b][c][g][r][h];"
           "[a]signalstats,metadata=print:file=sig.txt,nullsink;"
           "[b]tblend=all_mode=difference,signalstats,metadata=print:file=mot.txt,nullsink;"
-          "[c]format=gray,blurdetect,metadata=print:file=blur.txt[o]")
+          "[c]format=gray,blurdetect,metadata=print:file=blur.txt[o];"
+          "[g]scale=48:27:flags=area,format=gray,fps=6[og];"
+          "[r]scale=16:9:flags=area,format=rgb24,fps=3[or];"
+          "[h]scale=9:8:flags=area,format=gray,select='eq(n,5)'[oh]")
+_RAW = (("og", "gray", 6, 48 * 27), ("or", "rgb", 3, 16 * 9 * 3), ("oh", "hash", 1, 72))
+
+
+def _read_raw(path: Path, size: int) -> list[bytes]:
+    if not path.is_file():
+        return []
+    data = path.read_bytes()
+    return [data[i * size:(i + 1) * size] for i in range(len(data) // size)]
 
 
 def _read_metadata(path: Path, keys: set[str]) -> dict[str, float]:
@@ -47,12 +61,16 @@ def measure_window(path: str, start: float, dur: float = WINDOW, hdr: bool = Fal
     graph = _GRAPH.format(w=ANALYSIS_WIDTH, tm=vid_sheets.TONEMAP_HLG if hdr else "")
     with tempfile.TemporaryDirectory(prefix="mhvid_score_") as d:
         cmd = [vl.find_ffmpeg()["ffmpeg"], "-v", "error"] + (["-hwaccel", "cuda"] if hw else []) + \
-              ["-ss", f"{max(0.0, start):.2f}", "-t", str(dur), "-i", vl.ffp(path), "-an", "-filter_complex", graph,
+              ["-threads", str(DECODE_THREADS), "-ss", f"{max(0.0, start):.2f}", "-t", str(dur), "-i", vl.ffp(path),
+               "-an", "-filter_complex", graph,
                "-map", "[o]", "-f", "null", "-"]
+        for label, name, frames_n, _size in _RAW:
+            cmd += ["-map", f"[{label}]", "-frames:v", str(frames_n), "-f", "rawvideo", f"{name}.raw"]
         r = subprocess.run(cmd, capture_output=True, text=True, cwd=d)
         sig = _read_metadata(Path(d) / "sig.txt", {"YAVG", "SATAVG", "YLOW", "YHIGH"})
         mot = _read_metadata(Path(d) / "mot.txt", {"YAVG"})
         blur = _read_metadata(Path(d) / "blur.txt", {"blur"})
+        tiny = {name: _read_raw(Path(d) / f"{name}.raw", size) for _l, name, _n, size in _RAW}
     if r.returncode != 0 and not sig:
         return None
     if not sig:
@@ -60,7 +78,7 @@ def measure_window(path: str, start: float, dur: float = WINDOW, hdr: bool = Fal
     # blurdetect reports nothing when it finds no edges at all (black or featureless frames): treat as very soft
     return {"brightness": sig.get("YAVG", 0.0), "saturation": sig.get("SATAVG", 0.0),
             "contrast": sig.get("YHIGH", 0.0) - sig.get("YLOW", 0.0),
-            "motion": mot.get("YAVG", 0.0), "blur": blur.get("blur", 10.0)}
+            "motion": mot.get("YAVG", 0.0), "blur": blur.get("blur", 10.0), "tiny": tiny}
 
 
 def windows_for(duration: float, positions=POSITIONS, dur: float = WINDOW) -> list[float]:
@@ -101,6 +119,17 @@ def flags(m: dict) -> list[str]:
     if m["motion"] < 1.2:
         out.append("static")
     return out
+
+
+def hash_from_pixels(px: bytes) -> int | None:
+    """64-bit difference hash from a 9x8 grayscale frame (72 bytes)."""
+    if len(px) < 72:
+        return None
+    h = 0
+    for y in range(8):
+        for x in range(8):
+            h = (h << 1) | (1 if px[y * 9 + x] > px[y * 9 + x + 1] else 0)
+    return h
 
 
 def dhash(path: str, t: float, hdr: bool = False) -> int | None:
@@ -144,10 +173,16 @@ def score_clip(rec: dict, hw: bool = False) -> dict:
            "best_start": best["start"],
            "brightness": round(best["brightness"], 1), "contrast": round(best["contrast"], 1),
            "saturation": round(best["saturation"], 1), "blur": round(best["blur"], 2),
-           "motion": round(best["motion"], 2), "flags": flags(best), "windows": len(wins),
-           "hash": dhash(rec["path"], mid, bool(rec.get("hdr")))}
-    # editorial measurements (shot size, camera motion direction, saliency centroid) for the 'why' of the cut
-    out.update(vid_editorial.measure_shot(rec["path"], best["start"], WINDOW, bool(rec.get("hdr"))))
+           "motion": round(best["motion"], 2), "flags": flags(best), "windows": len(wins)}
+    tiny = best.get("tiny") or {}
+    h = hash_from_pixels(tiny["hash"][0]) if tiny.get("hash") else None
+    out["hash"] = h if h is not None else dhash(rec["path"], mid, bool(rec.get("hdr")))
+    # editorial measurements (shot size, camera motion direction, saliency centroid, colour) for the 'why' of the cut,
+    # taken from the frames the window pass already decoded; the slow separate decode is only the fallback
+    if tiny.get("gray"):
+        out.update(vid_editorial.measure_from_frames(tiny["gray"], tiny.get("rgb")))
+    else:
+        out.update(vid_editorial.measure_shot(rec["path"], best["start"], WINDOW, bool(rec.get("hdr"))))
     return out
 
 
@@ -207,7 +242,7 @@ def score_inventory(records: list[dict], workers: int | None = None, limit: int 
             progress(f"scored {done}/{len(recs)} ({reused} reused)")
         return out
 
-    with ThreadPoolExecutor(workers or vl.cpu_workers(6)) as ex:
+    with ThreadPoolExecutor(workers or vl.cpu_workers(8)) as ex:
         scores = list(ex.map(one, recs))
     ok = [s for s in scores if "quality" in s]
     for s, e in zip(ok, percentile_rank([s["motion"] for s in ok])):

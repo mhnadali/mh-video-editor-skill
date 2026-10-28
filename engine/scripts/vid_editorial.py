@@ -258,8 +258,20 @@ def saliency_centroid(frames: list[bytes], w: int = GW, h: int = GH) -> tuple[fl
 
 
 def measure_shot(clip: str, start: float, dur: float, hdr: bool = False) -> dict:
-    """All editorial measurements for one window of a clip."""
+    """All editorial measurements for one window of a clip (decodes the window itself)."""
     frames = gray_frames(clip, start, min(max(dur, 0.3), 2.0), hdr=hdr)
+    if not frames:
+        return {}
+    try:
+        rgb = rgb_frames(clip, start, min(max(dur, 0.3), 2.0), hdr=hdr)
+    except OSError:
+        rgb = []
+    return measure_from_frames(frames, rgb)
+
+
+def measure_from_frames(frames: list[bytes], rgb: list[bytes] | None = None) -> dict:
+    """The editorial measurements from tiny frames already decoded elsewhere (`score` gets them for free from the same
+    pass that measures exposure and motion, so a clip is decoded once per window instead of four times)."""
     if not frames:
         return {}
     mid = frames[len(frames) // 2]
@@ -268,11 +280,9 @@ def measure_shot(clip: str, start: float, dur: float, hdr: bool = False) -> dict
     out = {"shot_size": shot_size(mid), "motion_dx": dx, "motion_dy": dy, "motion_mag": mag,
            "focus_x": cx, "focus_y": cy, "flux": flux(frames), "internal_cut": internal_cut(frames),
            "local_motion": local_motion(frames)}
-    try:
-        hue, sat = dominant_hue(rgb_frames(clip, start, min(max(dur, 0.3), 2.0), hdr=hdr))
+    if rgb:
+        hue, sat = dominant_hue(rgb)
         out["hue"], out["colourfulness"] = hue, sat
-    except OSError:
-        pass
     return out
 
 

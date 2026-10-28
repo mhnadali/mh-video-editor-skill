@@ -104,12 +104,30 @@ def _resolve_encoder(pref: str) -> str:
     raise vl.EngineError(f"unknown encoder '{pref}'")
 
 
+# Constant-quality settings. Every shot is encoded once as a cached part and the parts are encoded again when they are
+# assembled, so the parts must be close to lossless or the second encode compounds the first. `high` (the default for a
+# final render) keeps the picture visually as good as the source; `standard` is the pre-0.14 behaviour.
+QUALITY = {
+    "standard": {"part_crf": 16, "final_crf": 18, "preset": "slow", "nvenc_cq": 21, "hw_q": 22, "vt_q": 40, "audio_kbps": 192},
+    "high": {"part_crf": 12, "final_crf": 16, "preset": "medium", "nvenc_cq": 17, "hw_q": 17, "vt_q": 55, "audio_kbps": 256},
+    "max": {"part_crf": 8, "final_crf": 11, "preset": "slower", "nvenc_cq": 14, "hw_q": 13, "vt_q": 70, "audio_kbps": 320},
+}
+
+
+def quality_settings(name: str | None) -> dict:
+    q = name or "standard"
+    if q not in QUALITY:
+        raise vl.EngineError(f"unknown quality '{q}' (known: {', '.join(QUALITY)})")
+    return QUALITY[q]
+
+
 def encoder_args(pref: str, preview: bool, bitrate_kbps: int | None = None, maxrate_kbps: int | None = None,
-                 two_pass: int | None = None, passlog: str | None = None) -> tuple[list[str], str]:
+                 two_pass: int | None = None, passlog: str | None = None, quality: str | None = None) -> tuple[list[str], str]:
     """FFmpeg video-encoder arguments. With `bitrate_kbps` the encoder targets a bitrate (for a size budget); otherwise
     it uses constant quality. `two_pass` is 1 or 2 for the two libx264 passes of a strict size target."""
     kind = _resolve_encoder(pref)
     enc = "libx264" if kind == "libx264" else HW_H264[kind]
+    qs = quality_settings(quality)
     if bitrate_kbps:
         mr = maxrate_kbps or int(bitrate_kbps * 1.45)
         buf = int(mr * 2)
@@ -124,13 +142,13 @@ def encoder_args(pref: str, preview: bool, bitrate_kbps: int | None = None, maxr
                      "-maxrate", f"{mr}k", "-bufsize", f"{buf}k"], enc)
         return ["-c:v", enc, "-b:v", f"{bitrate_kbps}k", "-maxrate", f"{mr}k", "-bufsize", f"{buf}k"], enc
     if kind == "nvenc":
-        q = "28" if preview else "21"
+        q = "28" if preview else str(qs["nvenc_cq"])
         return ["-c:v", enc, "-preset", "p5", "-rc", "vbr", "-cq", q, "-b:v", "0"], enc
     if kind in ("videotoolbox", "qsv", "vaapi", "amf"):
-        return ["-c:v", enc, "-q:v", "55" if preview else "40"] if kind == "videotoolbox" else \
-               ["-c:v", enc, "-global_quality", "28" if preview else "22"], enc
-    crf = "24" if preview else "18"
-    return ["-c:v", "libx264", "-preset", "veryfast" if preview else "slow", "-crf", crf], "libx264"
+        return ["-c:v", enc, "-q:v", "55" if preview else str(qs["vt_q"])] if kind == "videotoolbox" else \
+               ["-c:v", enc, "-global_quality", "28" if preview else str(qs["hw_q"])], enc
+    crf = "24" if preview else str(qs["final_crf"])
+    return ["-c:v", "libx264", "-preset", "veryfast" if preview else qs["preset"], "-crf", crf], "libx264"
 
 
 # --------------------------------------------------------------------------- shots
@@ -217,7 +235,7 @@ def _reframe(pl: dict) -> list[str]:
         fx, fy = float(focus[0]), float(focus[1])
         return [f"scale={W}:{H}:force_original_aspect_ratio=increase",
                 f"crop={W}:{H}:x='(iw-ow)*{fx:.4f}':y='(ih-oh)*{fy:.4f}'"]
-    return [f"scale={W}:{H}:force_original_aspect_ratio=increase", f"crop={W}:{H}"]
+    return [f"scale={W}:{H}:force_original_aspect_ratio=increase:flags=lanczos", f"crop={W}:{H}"]
 
 
 def part_front(pl: dict, hdr: bool, src_fps: float = 30.0) -> str:
@@ -243,7 +261,7 @@ def part_vf(pl: dict, hdr: bool, src_fps: float = 30.0) -> str:
     if pl["zoom"] > 0:
         rate = pl["zoom"] / max(n, 1)
         z = f"1.0+{rate:.6f}*n"
-        parts.append(f"scale=w='trunc({W}*({z})/2)*2':h='trunc({H}*({z})/2)*2':eval=frame")
+        parts.append(f"scale=w='trunc({W}*({z})/2)*2':h='trunc({H}*({z})/2)*2':eval=frame:flags=lanczos")
         parts.append(f"crop={W}:{H}")
         parts.append("setsar=1")                       # the zoom scale rounds to even sizes and leaves SAR 481:480; concat needs 1:1
     corr = pl.get("correct")
@@ -331,7 +349,7 @@ def _cache_key(cmd: list[str], clip: str) -> str:
 
 
 def render_part(edl: dict, j: int, bounds: list[int], trans: dict[int, str], scale: float, workdir: Path,
-                use_cache: bool = True, hwdecode: str = "none", fmt: str | None = None) -> dict:
+                use_cache: bool = True, hwdecode: str = "none", fmt: str | None = None, quality: str | None = None) -> dict:
     lut_dir = workdir.parent / "luts"
     lut_dir.mkdir(parents=True, exist_ok=True)
     pl = part_plan(edl, j, bounds, trans, scale, fmt, lut_dir)
@@ -356,7 +374,8 @@ def render_part(edl: dict, j: int, bounds: list[int], trans: dict[int, str], sca
         pl["trf"] = str(workdir / f"{j:03d}_{tag}.trf")
     vf = part_vf(pl, hdr, src_fps)
     cmd = [ff, "-v", "error", "-y"] + hw + ["-ss", f"{st:.3f}", "-i", pl["clip"], "-an",
-           "-frames:v", str(pl["n"]), "-vf", vf, "-c:v", "libx264", "-preset", "veryfast", "-crf", "16",
+           "-frames:v", str(pl["n"]), "-vf", vf, "-c:v", "libx264", "-preset", "veryfast",
+           "-crf", str(quality_settings(quality)["part_crf"]),
            "-r", str(pl["fps"]), "-pix_fmt", "yuv420p"]
     key = _cache_key([c for c in cmd[1:] if c not in hw], pl["clip"])      # same cache entry with or without GPU decode
     out = workdir / f"{j:03d}_{key}.mp4"
@@ -640,7 +659,7 @@ def render(edl_path: str | os.PathLike, out: str | os.PathLike | None = None, pr
            force: bool = False, workers: int | None = None, log=vl.say, hwdecode: str = "auto",
            qa: bool = False, fmt: str | None = None, delivery: str | None = None, target_size_mb: float | None = None,
            bitrate: int | None = None, manifest: bool = False, bundle: bool = False,
-           json_out: str | os.PathLike | None = None) -> dict:
+           json_out: str | os.PathLike | None = None, quality: str | None = None) -> dict:
     t_start = time.time()
     edl = ve.load(edl_path)
     issues = ve.lint(edl)
@@ -662,6 +681,8 @@ def render(edl_path: str | os.PathLike, out: str | os.PathLike | None = None, pr
                 fmt = deliv["format"]
     p = ve.project(edl)
     scale = 0.5 if preview else 1.0
+    quality = "standard" if preview else (quality or p.get("quality") or "high")       # previews stay light; finals are high
+    qs = quality_settings(quality)
     base = Path(edl_path).resolve().parent
     work = Path(workdir) if workdir else base / (Path(edl_path).stem + "_work")
     music_path = resolve_music(edl, work)
@@ -679,7 +700,7 @@ def render(edl_path: str | os.PathLike, out: str | os.PathLike | None = None, pr
     t_parts = time.time()
     done = 0
     with ThreadPoolExecutor(workers or vl.cpu_workers(4)) as ex:
-        futs = {ex.submit(render_part, edl, j, bounds, trans, scale, pdir, use_cache, hwdecode, fmt): j for j in range(n)}
+        futs = {ex.submit(render_part, edl, j, bounds, trans, scale, pdir, use_cache, hwdecode, fmt, quality): j for j in range(n)}
         parts_by_j: dict[int, dict] = {}
         for fut in as_completed(futs):
             parts_by_j[futs[fut]] = fut.result()
@@ -713,7 +734,7 @@ def render(edl_path: str | os.PathLike, out: str | os.PathLike | None = None, pr
             cmd += ["-i", vl.ffp(x["path"])]
         cmd += extra + [vl.filter_script_flag(), vl.ffp(graph_file), "-map", "[vout]"]
         if map_audio and p.get("music"):
-            cmd += ["-map", "[aout]", "-c:a", "aac", "-b:a", f"{vid_deliver.AUDIO_KBPS}k"]
+            cmd += ["-map", "[aout]", "-c:a", "aac", "-b:a", f"{vid_deliver.AUDIO_KBPS if video_kbps else qs['audio_kbps']}k"]
         elif not map_audio:
             cmd += ["-an"]
         cmd += enc_args + ["-pix_fmt", vid_deliver.PIX_FMT, "-r", str(p["fps"]), "-t", f"{p['duration']:.3f}"]
@@ -728,14 +749,14 @@ def render(edl_path: str | os.PathLike, out: str | os.PathLike | None = None, pr
     two_pass = bool(video_kbps) and _resolve_encoder(encoder) == "libx264" and not preview
     if two_pass:
         passlog = str(work / f"pass_{tag or 'main'}")
-        enc1, _ = encoder_args(encoder, preview, video_kbps, maxrate, two_pass=1, passlog=passlog)
+        enc1, _ = encoder_args(encoder, preview, video_kbps, maxrate, two_pass=1, passlog=passlog, quality=quality)
         r = assemble(enc1, out_path, map_audio=True, to_null=True)
         if r.returncode != 0:
             raise vl.EngineError(f"assembly (pass 1) failed (exit {r.returncode}):\n{(r.stderr or '')[-1200:]}")
-        enc, enc_name = encoder_args(encoder, preview, video_kbps, maxrate, two_pass=2, passlog=passlog)
+        enc, enc_name = encoder_args(encoder, preview, video_kbps, maxrate, two_pass=2, passlog=passlog, quality=quality)
         r = assemble(enc, out_path, map_audio=True)
     else:
-        enc, enc_name = encoder_args(encoder, preview, video_kbps, maxrate)
+        enc, enc_name = encoder_args(encoder, preview, video_kbps, maxrate, quality=quality)
         r = assemble(enc, out_path, map_audio=True)
     assemble_seconds = round(time.time() - t_asm, 1)
     if r.returncode != 0:
@@ -750,7 +771,7 @@ def render(edl_path: str | os.PathLike, out: str | os.PathLike | None = None, pr
     result = {"out": str(out_path), "shots": n, "qa": qa_report["verdict"] if qa_report else None, "parts_cached": cached, "encoder": enc_name,
               "frames": vl.frames(p["duration"], p["fps"]), "seconds": round(time.time() - t_start, 1),
               "parts_seconds": parts_seconds, "assemble_seconds": assemble_seconds,
-              "preview": preview, "workdir": str(work), "format": fmt, "size": list(size), "size_mb": round((info.get("size") or 0) / 1e6, 2)}
+              "preview": preview, "quality": quality, "workdir": str(work), "format": fmt, "size": list(size), "size_mb": round((info.get("size") or 0) / 1e6, 2)}
     if delivery or target_size_mb:
         result["delivery_check"] = vid_deliver.verify_delivery(info, float(target_size_mb) if target_size_mb else None, delivery)
     if manifest:

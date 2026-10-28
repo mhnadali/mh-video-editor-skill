@@ -111,6 +111,8 @@ python engine/scripts/mh_video.py color scope "D:/Trip/clips/a.mov" --at 3.2 --o
 
 ## ۷. متن فارسی
 
+> پیش‌فرض: **هیچ متنی روی ویدیو گذاشته نمی‌شود** و در سؤال‌های بریف هم دربارهٔ متن پرسیده نمی‌شود. این بخش فقط وقتی استفاده می‌شود که خودتان متن بخواهید.
+
 ```json
 "texts": [
   {"text": "کویر مرنجاب", "start": 0.4, "end": 3.0, "position": "title", "style": "title", "animation": "fade"},

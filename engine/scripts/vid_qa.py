@@ -40,8 +40,9 @@ FREEZE_DIFF = 0.02
 LOUDNESS_TOLERANCE = (-3.0, 2.0)          # LU around the target
 TRUE_PEAK_WARN = -1.0
 TRUE_PEAK_ERROR = -0.1
-MAX_MB_PER_SECOND = 6.0
+MAX_MB_PER_SECOND = 6.0           # per 1080p-sized picture: the limits below scale with the number of pixels
 MAX_FILE_MB = 400.0
+HD_PIXELS = 1080 * 1920
 EXPOSURE_JUMP = 45.0            # luma levels between the 4 frames before and after a hard cut
 EXPOSURE_JUMP_SHARE = 0.30      # warn when more than this share of the cuts jump that much (v4 had 14%, median jump 12)
 CUT_SCENE_MIN = 0.12            # scene score a hard cut normally exceeds
@@ -342,9 +343,11 @@ def check_structure(info: dict, p: dict | None, size_bytes: int) -> list[dict]:
     out: list[dict] = []
     mb = size_bytes / 1e6
     per_sec = mb / max(info["duration"], 0.1)
-    if mb > MAX_FILE_MB:
-        out.append({"id": "file-size", "level": "error", "msg": f"{mb:.0f} MB is above {MAX_FILE_MB:.0f} MB (grain/noise or a wrong quality setting)"})
-    elif per_sec > MAX_MB_PER_SECOND:
+    scale = max(1.0, (info.get("width", 0) * info.get("height", 0)) / HD_PIXELS)       # a 4K picture is allowed 4x the bytes
+    max_mb, max_per_sec = MAX_FILE_MB * scale, MAX_MB_PER_SECOND * scale
+    if mb > max_mb:
+        out.append({"id": "file-size", "level": "error", "msg": f"{mb:.0f} MB is above {max_mb:.0f} MB (grain/noise or a wrong quality setting)"})
+    elif per_sec > max_per_sec:
         out.append({"id": "file-size", "level": "warn", "msg": f"{per_sec:.1f} MB per second ({mb:.0f} MB): unusually heavy for a reel"})
     else:
         out.append({"id": "file-size", "level": "ok", "msg": f"{mb:.1f} MB ({per_sec:.2f} MB/s)"})
@@ -366,7 +369,7 @@ def check_structure(info: dict, p: dict | None, size_bytes: int) -> list[dict]:
 
 # --------------------------------------------------------------------------- EDL audits
 
-def audit_edit(edl: dict, scores: dict | None = None) -> tuple[list[dict], dict]:
+def audit_edit(edl: dict, scores: dict | None = None, notes: dict | None = None) -> tuple[list[dict], dict]:
     """Effects, transitions, pacing and beat alignment of the plan itself (from the EDL, not the pixels)."""
     out: list[dict] = []
     p = ve.project(edl)
@@ -468,8 +471,13 @@ def audit_edit(edl: dict, scores: dict | None = None) -> tuple[list[dict], dict]
         for sh in edl["shots"]:
             key = os.path.normcase(os.path.abspath(sh["clip"]))
             feats.append(next((s for s in scores.values() if s.get("path") and os.path.normcase(os.path.abspath(s["path"])) == key), {}))
+        if notes:                                          # the agent's reading of the footage wins over the measurements
+            import vid_cutlogic
+            nt = vid_cutlogic.notes_by_path(notes)
+            feats = [vid_cutlogic.override_score(f, nt.get(os.path.normcase(os.path.abspath(sh["clip"])))) if f else f
+                     for f, sh in zip(feats, edl["shots"])]
         if any(f.get("shot_size") for f in feats):
-            out += vid_editorial.editorial_issues(edl, feats, bounds, trans)
+            out += [dict(i, id=i["code"]) for i in vid_editorial.editorial_issues(edl, feats, bounds, trans)]   # QA checks are keyed by `id`
             ed = vid_editorial.summarize_editorial(edl, feats, bounds, trans)
             audit.update(ed)
             out.append({"id": "editorial", "level": "info",
@@ -481,7 +489,7 @@ def audit_edit(edl: dict, scores: dict | None = None) -> tuple[list[dict], dict]
 # --------------------------------------------------------------------------- orchestration
 
 def run_qa(video: str | os.PathLike, edl_path: str | os.PathLike | None = None, scores: dict | None = None,
-           sheet: str | os.PathLike | None = None, log=None, fmt: str | None = None) -> dict:
+           sheet: str | os.PathLike | None = None, log=None, fmt: str | None = None, notes: dict | None = None) -> dict:
     edl = ve.load(edl_path) if edl_path else None
     info = vl.probe(video)
     if not info.get("has_video"):
@@ -510,7 +518,7 @@ def run_qa(video: str | os.PathLike, edl_path: str | os.PathLike | None = None, 
     checks += check_audio(aud, bool(p and p.get("music")), target, info["duration"])
     audit, audit_data = ({}, {})
     if edl:
-        audit_checks, audit_data = audit_edit(edl, scores)
+        audit_checks, audit_data = audit_edit(edl, scores, notes)
         checks += audit_checks
     worst = max((level_rank(c["level"]) for c in checks), default=0)
     verdict = {0: "pass", 1: "pass", 2: "warn", 3: "fail"}[worst]
