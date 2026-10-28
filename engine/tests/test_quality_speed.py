@@ -111,7 +111,8 @@ class SinglePassScore(unittest.TestCase):
         root.mkdir(exist_ok=True)
         clip = helpers.make_clip(root / "a.mp4", "testsrc2", size="320x568", seconds=4.0)
         m = vs.measure_window(vl.ffp(clip), 1.0, 1.0)
-        self.assertEqual({k: len(v) for k, v in m["tiny"].items()}, {"gray": 6, "rgb": 3, "hash": 3, "jit": 10})
+        self.assertEqual({k: len(v) for k, v in m["tiny"].items()}, {"gray": 6, "rgb": 3, "hash": 10, "jit": 10})
+        self.assertEqual(len(vs.hash_frames(m["tiny"]["hash"])), 3)
         self.assertEqual(len(m["tiny"]["hash"][1]), 72)
         rec = {"index": 0, "path": vl.ffp(clip), "name": "a.mp4", "duration": 4.0, "size": 1, "mtime": 1, "error": None}
         out = vs.score_clip(rec)

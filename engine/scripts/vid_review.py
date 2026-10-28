@@ -11,6 +11,7 @@ import base64
 import json
 import os
 import tempfile
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Optional
 
@@ -30,12 +31,22 @@ def strip_for(rec: dict, workdir: Path, size: int = FRAME) -> list:
     return out
 
 
-def build_data(sb: dict, inventory: list, scores: dict, workdir: Path, beats: Optional[dict] = None, log=print) -> dict:
+def build_data(sb: dict, inventory: list, scores: dict, workdir: Path, beats: Optional[dict] = None, log=print,
+               workers: int = 6) -> dict:
     by = {r["index"]: r for r in inventory}
+    shown = {}
+    for r in sb["rows"]:
+        for i in [r["clip"]] + list(r.get("alternates") or []):
+            if i in by and i not in shown:
+                shown[i] = None
+    log(f"extracting frames of {len(shown)} clips ...")
+    with ThreadPoolExecutor(max(1, workers)) as ex:
+        for i, frames in zip(list(shown), ex.map(lambda i: strip_for(by[i], workdir), list(shown))):
+            shown[i] = frames
     rows = []
     for r in sb["rows"]:
         entry = {k: r.get(k) for k in ("slot", "t", "len", "chapter", "clip", "name", "device", "role", "people", "topic",
-                                       "energy", "target", "music", "start", "why", "score")}
+                                       "energy", "target", "music", "start", "why", "score", "lookalike")}
         clips = []
         for i in [r["clip"]] + list(r.get("alternates") or []):
             rec = by.get(i)
@@ -43,10 +54,9 @@ def build_data(sb: dict, inventory: list, scores: dict, workdir: Path, beats: Op
                 continue
             sc = scores.get(i) or {}
             clips.append({"index": i, "name": rec.get("name"), "taken": rec.get("taken"), "duration": round(rec.get("duration") or 0, 1),
-                          "quality": sc.get("quality"), "frames": strip_for(rec, workdir)})
+                          "quality": sc.get("quality"), "frames": shown[i]})
         entry["clips"] = clips
         rows.append(entry)
-        log(f"  slot {r['slot']}: {len(clips)} clip(s)")
     return {"duration": sb.get("duration"), "variant": sb.get("variant"), "rows": rows}
 
 
@@ -102,6 +112,7 @@ function render(){
     const head = el('div','head'); head.append(el('b',null,'Slot '+r.slot), el('span','tag',(r.t??0).toFixed(1)+'s · '+(r.len??0).toFixed(1)+'s · '+(r.chapter||'')));
     box.append(head);
     box.append(el('div','why', r.why||''));
+    if(r.lookalike && r.lookalike.length) box.append(el('div','why','Looks like the shot in slot '+r.lookalike.join(', ')+': keep only one if they show the same thing.'));
     const row = el('div','clips');
     r.clips.forEach(c=>{
       const w = el('div','clip'+(c.index===cur?' sel':'')+(c.banned?' banned':''));

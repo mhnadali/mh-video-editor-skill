@@ -9,8 +9,12 @@ Finds people and faces in the footage so the story-first selection can count the
   body, full body). A scene classifier is used only if you give it an ONNX file of your own (`--onnx`, `--labels`).
 - **Run it:** `python engine/scripts/mh_video.py vision run --work <work-dir>` writes `<work-dir>/vision.json`. `story select`,
   `story exclusions` and the review page read it automatically.
-- **How good is it?** Measured against 34 hand-labelled clips of a real trip, 9 frames per clip: a face or body in any frame finds 92 %
-  of the clips with people and wrongly flags 2 of 10 landscapes (precision 92 %). `people_sure` (a face in two frames, or a large one)
-  has precision 95 % and recall 75 %. Cascades miss small, turned-away or shadowed people and close-ups of hands: the agent's own
-  `people` / `role` notes always win over this plug-in.
+- **How good is it? Honestly: a weak hint.** Measured against 60 clips of a real desert trip that were labelled by looking at three
+  frames of each (a sample with a share of every kind of verdict; 413 clips were looked at): a face or body in any frame (`person`)
+  finds about 80 % of the clips with people but is right only about 40 % of the time on the whole trip; a face in three or more
+  frames (`person_sure`) is right 60 % of the time and finds a third to a half of the people. Clouds, mirrors, grills and food
+  counters fool the cascades, and they miss small, turned-away or shadowed people. An earlier check on 34 clips had suggested 92 %;
+  it was too small and too easy. So the engine counts a sighting only as part of a person (60 % for `person_sure`, 25 % for the
+  rest) and the storyboard reports how many shots with people are confirmed by the agent's notes. The agent's own `people` / `role`
+  notes always win. A better detector (your own ONNX model) is the way to improve this; see `docs/CALIBRATION.md` to measure it.
 - **Requirements:** OpenCV 4.x (OpenCV 5 removed the cascade classifier, so `requirements.txt` pins `<5`).

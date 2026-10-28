@@ -25,6 +25,9 @@ import vidlib as vl
 PLUGIN_DIR = Path(__file__).resolve().parent.parent.parent / "plugins" / "vision"
 VISION_FILE = "vision.json"
 MIN_FACE_AREA = 0.004          # a face this small (share of the frame) is a passer-by, not a subject
+SURE_FACE_FRAMES = 3           # a face in this many sampled frames: measured on 60 labelled clips of a real trip, a face in any
+                               # frame is right 40 % of the time, in 3 or more frames 60 % (clouds, mirrors and food counters
+                               # fool the classic detector); the notes of the agent are the only reliable source
 
 
 def plugin_python(plugin_dir: Optional[Path] = None) -> Optional[Path]:
@@ -100,8 +103,12 @@ def merge_into_scores(scores: dict, vision: dict) -> int:
         s["faces"] = v.get("faces")
         s["face_area"] = v.get("face_area")
         s["bodies"] = v.get("bodies")
-        s["person"] = bool(v.get("people"))
-        s["person_sure"] = bool(v.get("people_sure"))
+        if v.get("face_frames") is not None:                                     # the raw count: apply the current rule
+            s["person"] = bool(v["face_frames"] >= 1 or (v.get("bodies") or 0) > 0)
+            s["person_sure"] = bool(v["face_frames"] >= SURE_FACE_FRAMES)
+        else:
+            s["person"] = bool(v.get("people"))
+            s["person_sure"] = bool(v.get("people_sure"))
         if v.get("scene_label"):
             s["scene_label"] = v["scene_label"]
         n += 1

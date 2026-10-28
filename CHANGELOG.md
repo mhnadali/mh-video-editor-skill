@@ -2,6 +2,19 @@
 
 All notable changes to this project. Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [SemVer](https://semver.org/).
 
+## [0.17.0] - 2026-10-28 (phase A: validation on real footage)
+First run of the 0.16 selection on a whole real library (Kavir trip: 486 clips, 3 cameras, 2 days). Measured against clips labelled by looking at them; the numbers are in `docs/CALIBRATION.md`.
+
+### Fixed
+- **The three picture hashes of every clip were one frame repeated** (an FFmpeg `select` filter let the muxer fill the gaps with duplicates; all 462 real clips had three identical hashes), so "2 of 3 frames must match" was a one-frame test. The window is now decoded fully and three frames are chosen in Python. Cached scores are repaired by `score` with a small decode (`top_up`: the hashes and the clip's sound spikes) instead of a full measurement; `SCHEMA` is 4.
+- **Same-moment strictness:** the brightness tolerance for a strict match is 10 (was 30, which joined two cameras filming one drive). On 20 labelled real pairs the strict rule went from precision 0.89 to 1.0.
+
+### Added
+- **Look-alike flags.** A looser reading of "same moment" never drops a clip; it only warns when two chosen shots look alike (`warnings`, `lookalike` on each row, a line on the review page). Desert footage is self-similar and cheap image features cannot tell a duplicate from a second shot of the same drive.
+- **People certainty.** The classic face detector measured 40 % precision (60 % for a face in 3+ frames) on 60 labelled clips, far below the first estimate. A sighting by the plug-in now counts as 0.6 (`person_sure`, a face in 3+ frames) or 0.25 of a person in the people bonus, the notes of the agent count fully, and the storyboard reports how many shots with people are confirmed by notes. The rule is read from the raw counts in `vision.json`, so it can change without running the plug-in again.
+- **`engine/tools/calibrate_selection.py`:** precision / recall of the same-moment rules and the people detector against your labels, plus a sweep of settings that never call a different pair "same". `docs/CALIBRATION.md` explains the procedure and records the first trip's numbers.
+- `story review` extracts the frames in parallel.
+
 ## [0.16.1] - 2026-10-28 (deep review of the selection depth)
 A line-by-line review of 0.16.0, a randomized check of the selection rules (thousands of random libraries, chapters, variants and profiles) and an end-to-end run on real clips. Every fix has a test (`test_deep_review.py`).
 

@@ -39,8 +39,14 @@ DEFAULT_DEDUPE = {
     "hash_bits": 12,              # Hamming distance (of 64) between picture hashes that still means "the same picture"
     "frames_matching": 2,         # how many of the 3 frames of a window must match
     "colour": 20.0,               # colour signature distance (0-255) below which the colours agree
-    "brightness": 30.0,           # brightness difference below which the light agrees
+    "brightness": 10.0,           # brightness difference below which the light agrees (30 wrongly joined two cameras of one drive)
     "cross_camera_window_s": 90.0,
+    # a second, looser reading that never drops a clip: two clips that match this way are only FLAGGED as look-alikes (the
+    # storyboard warns when both are chosen). Measured on a real trip, desert clips from one drive look alike without being
+    # the same shot, so the strict reading above is the only one that removes anything.
+    "lookalike_hash_bits": 16,
+    "lookalike_colour": 8.0,
+    "lookalike_brightness": 6.0,
 }
 
 
@@ -128,23 +134,41 @@ def pair_similarity(a: dict, b: dict, sa: dict, sb: dict) -> dict:
 
 
 def same_moment(a: dict, b: dict, sa: dict, sb: dict, cfg: Optional[dict] = None) -> bool:
+    return similarity_level(a, b, sa, sb, cfg) == "same"
+
+
+def similarity_level(a: dict, b: dict, sa: dict, sb: dict, cfg: Optional[dict] = None) -> Optional[str]:
+    """'same' (the strict reading: one of the two is dropped), 'lookalike' (the looser reading: flagged only) or None."""
     d = merged(DEFAULT_DEDUPE, cfg)
     ta, tb = a.get("taken_epoch") or 0.0, b.get("taken_epoch") or 0.0
     cross = (a.get("device") or "") != (b.get("device") or "")
     gap = abs(ta - tb)
     if gap > (d["cross_camera_window_s"] if cross else d["window_s"]):
-        return False
+        return None
     sim = pair_similarity(a, b, sa, sb)
     hd = sim["hash"]
     if not hd:
-        return False
-    close = sum(1 for x in hd if x <= d["hash_bits"])
+        return None
     need = min(d["frames_matching"], len(hd))
-    if close < need:
-        return False
-    if sim["colour"] > d["colour"] or sim["brightness"] > d["brightness"]:
-        return False
-    return True
+    if sum(1 for x in hd if x <= d["hash_bits"]) >= need and sim["colour"] <= d["colour"] and sim["brightness"] <= d["brightness"]:
+        return "same"
+    if sum(1 for x in hd if x <= d["lookalike_hash_bits"]) >= need and sim["colour"] <= d["lookalike_colour"] \
+            and sim["brightness"] <= d["lookalike_brightness"]:
+        return "lookalike"
+    return None
+
+
+def lookalikes(chosen: list, inventory: list, scores: dict, cfg: Optional[dict] = None) -> list:
+    """Pairs [i, j] among the chosen clips that look alike (the strict or the looser reading). The selection warns about them:
+    nothing is dropped automatically, the user decides on the review page."""
+    by = {r["index"]: r for r in inventory}
+    out = []
+    ids = [i for i in chosen if i in by and i in scores]
+    for x, i in enumerate(ids):
+        for j in ids[x + 1:]:
+            if similarity_level(by[i], by[j], scores[i], scores[j], cfg):
+                out.append([i, j])
+    return out
 
 
 def same_moment_clusters(inventory: list, scores: dict, cfg: Optional[dict] = None, only: Optional[set] = None) -> list:
