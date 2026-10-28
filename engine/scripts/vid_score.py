@@ -27,14 +27,17 @@ DECODE_THREADS = 2          # many small decodes in parallel beat a few wide one
 
 # One decode per window gives everything: exposure, motion and sharpness (metadata files) plus the tiny frames the
 # editorial measurements and the picture hash need (raw files): 6 gray 48x27 frames, 3 RGB 16x9 frames, one 9x8 frame.
-_GRAPH = ("fps=10,scale={w}:-2,{tm}format=yuv420p,split=6[a][b][c][g][r][h];"
+_GRAPH = ("fps=10,scale={w}:-2,{tm}format=yuv420p,split=7[a][b][c][g][r][h][j];"
           "[a]signalstats,metadata=print:file=sig.txt,nullsink;"
           "[b]tblend=all_mode=difference,signalstats,metadata=print:file=mot.txt,nullsink;"
           "[c]format=gray,blurdetect,metadata=print:file=blur.txt[o];"
           "[g]scale=48:27:flags=area,format=gray,fps=6[og];"
           "[r]scale=16:9:flags=area,format=rgb24,fps=3[or];"
-          "[h]scale=9:8:flags=area,format=gray,select='eq(n,5)'[oh]")
-_RAW = (("og", "gray", 6, 48 * 27), ("or", "rgb", 3, 16 * 9 * 3), ("oh", "hash", 1, 72))
+          "[h]scale=9:8:flags=area,format=gray,select='eq(n,2)+eq(n,5)+eq(n,8)'[oh];"
+          "[j]scale=48:27:flags=area,format=gray[oj]")
+# label, name, frames, bytes per frame. `hash` holds the frames 2, 5 and 8 of the window (the middle one is the picture hash);
+# `jit` is every frame of the window (10 at 10 fps) for the shake measurement
+_RAW = (("og", "gray", 6, 48 * 27), ("or", "rgb", 3, 16 * 9 * 3), ("oh", "hash", 3, 72), ("oj", "jit", 10, 48 * 27))
 
 
 def _read_raw(path: Path, size: int) -> list[bytes]:
@@ -175,7 +178,10 @@ def score_clip(rec: dict, hw: bool = False) -> dict:
            "saturation": round(best["saturation"], 1), "blur": round(best["blur"], 2),
            "motion": round(best["motion"], 2), "flags": flags(best), "windows": len(wins)}
     tiny = best.get("tiny") or {}
-    h = hash_from_pixels(tiny["hash"][0]) if tiny.get("hash") else None
+    hs = [hash_from_pixels(px) for px in (tiny.get("hash") or [])]
+    h = hs[len(hs) // 2] if hs else None
+    if hs and all(x is not None for x in hs):
+        out["hashes"] = hs                                  # three frames of the window: a duplicate has all of them close
     out["hash"] = h if h is not None else dhash(rec["path"], mid, bool(rec.get("hdr")))
     # every measured window (start, quality, motion): the story selection picks the action moment of a clip, not only its
     # most pleasant one
@@ -183,14 +189,17 @@ def score_clip(rec: dict, hw: bool = False) -> dict:
     if rec.get("has_audio"):                       # the clip's own sound in the chosen window (engines, voices, cheering)
         try:
             import vid_sfx
-            db = vid_sfx.mean_volume(rec["path"], best["start"], WINDOW)
+            db, peak = vid_sfx.volume_stats(rec["path"], best["start"], WINDOW)
             out["audio_db"] = None if db is None else round(db, 1)
+            out["audio_peak_db"] = None if peak is None else round(peak, 1)
         except (vl.EngineError, OSError):
             out["audio_db"] = None
     # editorial measurements (shot size, camera motion direction, saliency centroid, colour) for the 'why' of the cut,
     # taken from the frames the window pass already decoded; the slow separate decode is only the fallback
     if tiny.get("gray"):
         out.update(vid_editorial.measure_from_frames(tiny["gray"], tiny.get("rgb")))
+        out["shake"] = vid_editorial.jitter(tiny.get("jit") or [])
+        out["texture"] = vid_editorial.texture_mean(tiny["gray"])
     else:
         out.update(vid_editorial.measure_shot(rec["path"], best["start"], WINDOW, bool(rec.get("hdr"))))
     return out
@@ -241,7 +250,7 @@ def score_inventory(records: list[dict], workers: int | None = None, limit: int 
     def one(r):
         nonlocal done, reused
         old = previous.get(r["path"])
-        if old and old.get("size") == r.get("size") and old.get("mtime") == r.get("mtime") and "quality" in old                 and "flux" in old and "wins" in old:                                  # entries from before the editorial/colour/window fields are re-measured
+        if old and old.get("size") == r.get("size") and old.get("mtime") == r.get("mtime") and "quality" in old                 and "flux" in old and "wins" in old and "hashes" in old:                                  # entries from before the editorial/colour/window fields are re-measured
             out = dict(old)
             out["index"] = r["index"]
             reused += 1
@@ -324,7 +333,8 @@ def parse_index_spec(spec: str | None) -> set[int] | None:
 
 
 def candidates(records: list[dict], scores: dict[int, dict], skip_flagged: bool = True, skip_similar: bool = True,
-               min_quality: float = 0.0, only: set[int] | None = None, exclude: set[int] | None = None) -> list[dict]:
+               min_quality: float = 0.0, only: set[int] | None = None, exclude: set[int] | None = None,
+               min_duration: float = 0.0) -> list[dict]:
     """Clips that may be used, each merged with its score. Never includes exact duplicates.
 
     `only` restricts the pool to those inventory indexes (the agent chooses them from the contact sheets: measured
@@ -338,6 +348,8 @@ def candidates(records: list[dict], scores: dict[int, dict], skip_flagged: bool 
             continue
         if exclude and r["index"] in exclude:
             continue
+        if (r.get("duration") or 0.0) < min_duration - 0.1:
+            continue                                   # too short to be a usable take
         if skip_flagged and any(f in s["flags"] for f in ("dark", "overexposed", "blurry")):
             continue
         if skip_similar and s.get("similar_to") is not None:

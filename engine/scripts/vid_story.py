@@ -23,6 +23,7 @@ import os
 from typing import Optional
 
 import vid_cutlogic as cl
+import vid_filter as vf
 import vid_plan as vp
 import vidlib as vl
 
@@ -94,6 +95,18 @@ def validate_chapters(cfg: dict) -> dict:
             raise vl.EngineError(f"chapter '{c['name']}': order must be chronological or energy")
     if cfg.get("hook", "chronological") not in ("chronological", "teaser"):
         raise vl.EngineError("hook must be 'chronological' or 'teaser'")
+    for key, known in (("filters", vf.DEFAULT_FILTERS), ("dedupe", vf.DEFAULT_DEDUPE)):
+        given = cfg.get(key)
+        if given is None:
+            continue
+        if not isinstance(given, dict):
+            raise vl.EngineError(f"'{key}' must be an object")
+        for k in given:
+            if k not in known:
+                raise vl.EngineError(f"{key}: unknown setting '{k}' (known: {', '.join(known)})")
+    md = (cfg.get("filters") or {}).get("min_duration")
+    if md is not None and (not isinstance(md, (int, float)) or isinstance(md, bool) or md < 0):
+        raise vl.EngineError("filters.min_duration must be a number of seconds >= 0")
     return cfg
 
 
@@ -211,9 +224,17 @@ def clip_view(rec: dict, score: dict, note: dict) -> dict:
             "flags": score.get("flags") or [], "internal_cut": bool(score.get("internal_cut"))}
 
 
-def pool(chapter: dict, inventory: list, scores: dict, notes: dict, avoid: set, allow_flagged: bool = False) -> list:
+SOFT_REASONS = {"dark", "blurry", "shaky", "covered", "internal-cut", "low-quality"}
+
+
+def pool(chapter: dict, inventory: list, scores: dict, notes: dict, avoid: set, excluded: Optional[dict] = None,
+         relaxed: bool = False) -> list:
+    """The clips a chapter may use. `excluded` ({index: [reasons]}, from `vid_filter.exclusions`) removes unusable clips and
+    the weaker takes of a moment; `relaxed` still allows the soft reasons (dark, blurry, shaky ...) when a chapter has too
+    few clips, but never a short clip, a copy, a weaker take of the same moment or a clip marked `skip`."""
     out = []
     must = set(chapter.get("must") or [])
+    excluded = excluded or {}
     for rec in inventory:
         i = rec["index"]
         if not (chapter["from"] <= i <= chapter["to"]) or rec.get("dup_of") is not None or i in avoid:
@@ -222,11 +243,16 @@ def pool(chapter: dict, inventory: list, scores: dict, notes: dict, avoid: set, 
         if not sc or "quality" not in sc:
             continue
         note = _note(notes, rec)
-        if note.get("skip") or i in set(chapter.get("avoid") or []):
+        if i in set(chapter.get("avoid") or []):
+            continue
+        why = excluded.get(i, [])
+        if why and i not in must:
+            hard = [w for w in why if w.split(":")[0] not in SOFT_REASONS]
+            if hard or not relaxed:
+                continue
+        elif i in must and note.get("skip"):
             continue
         v = clip_view(rec, sc, note)
-        if i not in must and not allow_flagged and (("blurry" in v["flags"]) or ("dark" in v["flags"]) or v["internal_cut"]):
-            continue
         v["must"] = i in must
         out.append(v)
     return out
@@ -341,6 +367,9 @@ def select(inventory: list, scores: dict, beats: dict, cfg: dict, notes: Optiona
     cfg = validate_chapters(cfg)
     nt = cl.notes_by_path(notes)
     chapters = cfg["chapters"]
+    must_all = {i for c in chapters for i in (c.get("must") or [])}
+    ex = vf.exclusions(inventory, scores, notes, cfg.get("filters"), cfg.get("dedupe"), must=must_all)
+    excluded = ex["reasons"]
     slots = make_slots(beats, duration, body_start, pacing, intro_shots, period)
     teaser = cfg.get("hook") == "teaser"
     counts = allocate(chapters, slots, reserve=1 if teaser else 0, flex=cfg.get("flex", 0.3))
@@ -361,7 +390,7 @@ def select(inventory: list, scores: dict, beats: dict, cfg: dict, notes: Optiona
     teaser_entry = None
     if teaser:
         tc = next((c for c in chapters if c["name"] == cfg.get("teaser_chapter")), None) or max(chapters, key=chapter_energy)
-        cands = pool(tc, inventory, scores, nt, set())
+        cands = pool(tc, inventory, scores, nt, set(), excluded)
         if not cands:
             raise vl.EngineError("no clip available for the teaser")
         ctx["roles"] = {"action"}
@@ -376,10 +405,11 @@ def select(inventory: list, scores: dict, beats: dict, cfg: dict, notes: Optiona
         sl = slots[cursor:cursor + cnt]
         target = sum(s["music"] for s in sl) / len(sl) if sl else chapter_energy(c)
         target = 0.5 * target + 0.5 * chapter_energy(c)      # the music asks, the chapter's nature answers
-        cands = pool(c, inventory, scores, nt, used)
+        cands = pool(c, inventory, scores, nt, used, excluded)
         if len(cands) < cnt:
-            warnings.append(f"chapter '{c['name']}' has {len(cands)} usable clips for {cnt} slots; flagged clips were allowed")
-            cands = pool(c, inventory, scores, nt, used, allow_flagged=True)
+            warnings.append(f"chapter '{c['name']}' has {len(cands)} usable clips for {cnt} slots; clips with soft problems "
+                            "(dark, blurry, shaky ...) were allowed")
+            cands = pool(c, inventory, scores, nt, used, excluded, relaxed=True)
         if len(cands) < cnt:
             warnings.append(f"chapter '{c['name']}' only has {len(cands)} clips for {cnt} slots: the chapter is given fewer shots")
             cnt = len(cands)
@@ -428,7 +458,9 @@ def select(inventory: list, scores: dict, beats: dict, cfg: dict, notes: Optiona
         warnings.append(f"only {len(rows)} of {len(slots)} slots could be filled")
     return {"duration": duration, "slots": len(slots), "body_start": body_start, "pacing": pacing,
             "hook": cfg.get("hook", "chronological"), "chapters": chapter_summary(chapters, counts, rows),
-            "rows": rows, "warnings": warnings, "coverage": coverage(rows, inventory), "shortlist": shortlist}
+            "rows": rows, "warnings": warnings, "coverage": coverage(rows, inventory), "shortlist": shortlist,
+            "exclusions": vf.summarize(ex, sum(1 for r in inventory if r.get("dup_of") is None)),
+            "same_moment": [{"keep": c["keep"], "drop": c["drop"]} for c in ex["clusters"]]}
 
 
 def n_total(counts: list, teaser: bool) -> int:
@@ -495,6 +527,12 @@ def storyboard_markdown(sb: dict) -> str:
     cv = sb["coverage"]
     out += ["", "## Coverage", f"- cameras in the edit: {cv['devices_in_edit']} (library: {cv['devices_in_library']})",
             f"- shots with people: {cv['people_share']:.0%}", f"- roles: {cv['roles']}"]
+    ex = sb.get("exclusions")
+    if ex:
+        out += ["", "## Left out before choosing",
+                f"- {ex['usable']} of {ex['clips']} clips were usable; excluded: " +
+                ", ".join(f"{k} {v}" for k, v in ex["by_reason"].items()),
+                f"- {ex['same_moment_clusters']} moments were filmed more than once: only the best take of each is used"]
     if sb["warnings"]:
         out += ["", "## Warnings"] + [f"- {w}" for w in sb["warnings"]]
     return "\n".join(out) + "\n"
@@ -507,6 +545,10 @@ def format_storyboard(sb: dict) -> str:
                      f"{r['taken'][5:16]:11} {r['device'][:9]:9} {(r['role'] or '-')[:12]:12} {r['why']}")
     cv = sb["coverage"]
     lines.append(f"cameras {cv['devices_in_edit']} vs library {cv['devices_in_library']}; people {cv['people_share']:.0%}; roles {cv['roles']}")
+    ex = sb.get("exclusions")
+    if ex:
+        lines.append(f"left out: {ex['excluded']} of {ex['clips']} clips ({', '.join(f'{k} {v}' for k, v in ex['by_reason'].items())}); "
+                     f"{ex['same_moment_clusters']} repeated moments reduced to their best take")
     lines += [f"WARNING: {w}" for w in sb["warnings"]]
     return "\n".join(lines)
 

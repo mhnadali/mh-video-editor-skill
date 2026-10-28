@@ -162,11 +162,22 @@ def _load_candidates(a, skip_flagged=True, skip_similar=True):
     return recs, scores
 
 
+def _weaker_takes(a, recs, scores) -> set:
+    """Indexes of clips that are the weaker take of a moment filmed more than once (unless --keep-repeats)."""
+    if getattr(a, "keep_repeats", False):
+        return set()
+    import vid_filter
+    res = vid_filter.exclusions(recs, scores, None, {"min_duration": 0.0, "block_flags": [], "block_shaky": False,
+                                                       "block_covered": False, "block_internal_cut": False, "min_quality": 0.0})
+    return {i for i, why in res["reasons"].items() if any(w.startswith("same-moment") for w in why)}
+
+
 def cmd_rank(a) -> int:
     import vid_score
     recs, scores = _load_candidates(a)
+    drop = (vid_score.parse_index_spec(a.exclude) or set()) | _weaker_takes(a, recs, scores)
     cands = vid_score.candidates(recs, scores, skip_flagged=not a.allow_flagged, skip_similar=not a.allow_similar,
-                                 only=vid_score.parse_index_spec(a.only), exclude=vid_score.parse_index_spec(a.exclude))
+                                 only=vid_score.parse_index_spec(a.only), exclude=drop, min_duration=a.min_duration)
     key = {"quality": lambda c: -c["quality"], "energy": lambda c: (-c["energy"], -c["quality"])}[a.by]
     print(f"{'idx':>4} {'quality':>7} {'energy':>6} {'blur':>5} {'bright':>6}  flags / name")
     for c in sorted(cands, key=key)[: a.top]:
@@ -180,8 +191,9 @@ def cmd_pick(a) -> int:
     import vid_plan
     import vid_score
     recs, scores = _load_candidates(a)
+    drop = (vid_score.parse_index_spec(a.exclude) or set()) | _weaker_takes(a, recs, scores)
     cands = vid_score.candidates(recs, scores, skip_flagged=not a.allow_flagged, skip_similar=not a.allow_similar,
-                                 only=vid_score.parse_index_spec(a.only), exclude=vid_score.parse_index_spec(a.exclude))
+                                 only=vid_score.parse_index_spec(a.only), exclude=drop, min_duration=a.min_duration)
     intro, outro = a.intro_shots, 1
     body = a.count - intro - outro
     if body < 2:
@@ -304,6 +316,27 @@ def cmd_story(a) -> int:
         return 0
     beats = vl.load_json(a.beats) if getattr(a, "beats", None) else None
     notes = vl.load_json(a.notes) if getattr(a, "notes", None) else None
+    if a.action == "exclusions":
+        import csv
+        import vid_filter
+        cfg = vl.load_json(a.chapters) if a.chapters else {}
+        filters = dict(cfg.get("filters") or {})
+        if a.min_duration is not None:
+            filters["min_duration"] = a.min_duration
+        res = vid_filter.exclusions(inv, scores, notes, filters, cfg.get("dedupe"))
+        print(vid_filter.format_report(res, inv))
+        by = {r["index"]: r for r in inv}
+        out = Path(a.out or work / "exclusions.json")
+        vl.save_json(out, {"summary": vid_filter.summarize(res, sum(1 for r in inv if r.get("dup_of") is None)),
+                           "reasons": {str(i): w for i, w in sorted(res["reasons"].items())}, "clusters": res["clusters"]})
+        with open(out.with_suffix(".csv"), "w", newline="", encoding="utf-8") as fh:
+            w = csv.writer(fh)
+            w.writerow(["index", "taken", "device", "duration", "reasons", "name"])
+            for i, why in sorted(res["reasons"].items()):
+                r = by[i]
+                w.writerow([i, r.get("taken", ""), r.get("device", ""), round(r.get("duration") or 0, 1), " ".join(why), r["name"]])
+        print(f"wrote {out} and {out.with_suffix('.csv')}: why each clip is left out")
+        return 0
     cfg = vl.load_json(a.chapters)
     if a.action == "select":
         if not beats:
@@ -486,6 +519,8 @@ def cmd_verify(a) -> int:
 
 
 ARG_HELP = {
+    "min_duration": "ignore clips shorter than this many seconds (default 5; 0 = all)",
+    "keep_repeats": "keep every take of a moment (default: only the best take of each)",
     "chapters": "chapters.json: the story's chapters (name, from, to, weight, energy ...)",
     "body_start": "seconds where the beat-by-beat body starts (use the music's drop time to land the flash on the first body cut)",
     "pacing": "beat = one shot per beat; energy = hold calm beats, cut fast on strong ones",
@@ -568,6 +603,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--allow-similar", action="store_true")
     p.add_argument("--only", help="restrict to inventory indexes, e.g. 100-330,420-445 (choose them from the contact sheets)")
     p.add_argument("--exclude", help="drop inventory indexes, e.g. 12,40-52")
+    p.add_argument("--min-duration", type=float, default=5.0, help="ignore clips shorter than this many seconds (default 5; 0 = all)")
+    p.add_argument("--keep-repeats", action="store_true", help="keep every take of a moment (default: only the best take of each)")
     p.set_defaults(fn=cmd_rank)
     p = sub.add_parser("pick", help="story-ordered candidate clip list (calm intro, build, payoff, calm end)")
     p.add_argument("--work", required=True); p.add_argument("--count", type=int, required=True); p.add_argument("--out", required=True)
@@ -576,6 +613,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--allow-similar", action="store_true")
     p.add_argument("--only", help="restrict to inventory indexes, e.g. 100-330,420-445 (choose them from the contact sheets)")
     p.add_argument("--exclude", help="drop inventory indexes, e.g. 12,40-52")
+    p.add_argument("--min-duration", type=float, default=5.0, help="ignore clips shorter than this many seconds (default 5; 0 = all)")
+    p.add_argument("--keep-repeats", action="store_true", help="keep every take of a moment (default: only the best take of each)")
     p.set_defaults(fn=cmd_pick)
     p = sub.add_parser("need", help="how many clips a beat grid needs")
     p.add_argument("beats"); p.add_argument("--duration", type=float); p.add_argument("--period", type=float)
@@ -604,6 +643,9 @@ def build_parser() -> argparse.ArgumentParser:
     q = ssub.add_parser("chapters", help="draft chapters from the capture timeline (name them, weight them, then select)")
     q.add_argument("--work", required=True); q.add_argument("--out"); q.add_argument("--gap", type=float, default=35.0,
                    help="minutes of pause that start a new chapter (default 35)")
+    q = ssub.add_parser("exclusions", help="which clips are left out and why (too short, shaky, covered, the weaker take of a moment ...)")
+    q.add_argument("--work", required=True); q.add_argument("--chapters", help="chapters.json (its `filters` and `dedupe` settings apply)")
+    q.add_argument("--notes"); q.add_argument("--out"); q.add_argument("--min-duration", type=float, help="seconds (default 5)")
     q = ssub.add_parser("select", help="choose the shots for the chapters and the music; writes storyboard.json/.md and a clip list")
     q.add_argument("--work", required=True); q.add_argument("--beats", required=True); q.add_argument("--chapters", required=True)
     q.add_argument("--notes", help="shot-notes.json (role, mood, people, topic, shot_size, skip)")

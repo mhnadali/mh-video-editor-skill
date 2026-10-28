@@ -88,7 +88,7 @@ mh_video score [-h] --work WORK [--workers WORKERS] [--limit LIMIT] [--rescore]
 Table of the best (or most energetic) clips.
 
 ```
-mh_video rank [-h] --work WORK [--by {quality,energy}] [--top TOP] [--allow-flagged] [--allow-similar] [--only ONLY] [--exclude EXCLUDE]
+mh_video rank [-h] --work WORK [--by {quality,energy}] [--top TOP] [--allow-flagged] [--allow-similar] [--only ONLY] [--exclude EXCLUDE] [--min-duration MIN_DURATION] [--keep-repeats]
 ```
 
 | Argument | Required / default | Meaning |
@@ -100,13 +100,15 @@ mh_video rank [-h] --work WORK [--by {quality,energy}] [--top TOP] [--allow-flag
 | `--allow-similar` |  | include look-alike clips |
 | `--only ONLY` |  | restrict to inventory indexes, e.g. 100-330,420-445 (choose them from the contact sheets) |
 | `--exclude EXCLUDE` |  | drop inventory indexes, e.g. 12,40-52 |
+| `--min-duration MIN_DURATION` | default `5.0` | ignore clips shorter than this many seconds (default 5; 0 = all) |
+| `--keep-repeats` |  | keep every take of a moment (default: only the best take of each) |
 
 ## `pick`
 
 Story-ordered candidate clip list (calm intro, build, payoff, calm end).
 
 ```
-mh_video pick [-h] --work WORK --count COUNT --out OUT [--intro-shots INTRO_SHOTS] [--beats BEATS] [--payoff-share PAYOFF_SHARE] [--allow-flagged] [--allow-similar] [--only ONLY] [--exclude EXCLUDE]
+mh_video pick [-h] --work WORK --count COUNT --out OUT [--intro-shots INTRO_SHOTS] [--beats BEATS] [--payoff-share PAYOFF_SHARE] [--allow-flagged] [--allow-similar] [--only ONLY] [--exclude EXCLUDE] [--min-duration MIN_DURATION] [--keep-repeats]
 ```
 
 | Argument | Required / default | Meaning |
@@ -121,6 +123,8 @@ mh_video pick [-h] --work WORK --count COUNT --out OUT [--intro-shots INTRO_SHOT
 | `--allow-similar` |  | include look-alike clips |
 | `--only ONLY` |  | restrict to inventory indexes, e.g. 100-330,420-445 (choose them from the contact sheets) |
 | `--exclude EXCLUDE` |  | drop inventory indexes, e.g. 12,40-52 |
+| `--min-duration MIN_DURATION` | default `5.0` | ignore clips shorter than this many seconds (default 5; 0 = all) |
+| `--keep-repeats` |  | keep every take of a moment (default: only the best take of each) |
 
 ## `beats`
 
@@ -144,7 +148,7 @@ mh_video beats [-h] [--out OUT] [--max-seconds MAX_SECONDS] [--bpm BPM] [--beats
 Story-first selection: chapters, a storyboard to approve, and an audit of an EDL.
 
 ```
-mh_video story [-h] {chapters,select,audit} ...
+mh_video story [-h] {chapters,exclusions,select,audit} ...
 ```
 
 ### `story chapters`
@@ -160,6 +164,22 @@ mh_video story chapters [-h] --work WORK [--out OUT] [--gap GAP]
 | `--work WORK` | required | work folder (inventory, scores, sheets, beats live here) |
 | `--out OUT` |  | output file |
 | `--gap GAP` | default `35.0` | minutes of pause that start a new chapter (default 35) |
+
+### `story exclusions`
+
+Which clips are left out and why (too short, shaky, covered, the weaker take of a moment ...).
+
+```
+mh_video story exclusions [-h] --work WORK [--chapters CHAPTERS] [--notes NOTES] [--out OUT] [--min-duration MIN_DURATION]
+```
+
+| Argument | Required / default | Meaning |
+|---|---|---|
+| `--work WORK` | required | work folder (inventory, scores, sheets, beats live here) |
+| `--chapters CHAPTERS` |  | chapters.json (its `filters` and `dedupe` settings apply) |
+| `--notes NOTES` |  | shot-notes.json: the agent's reading of the footage (role, mood, people, topic, shot_size ...) |
+| `--out OUT` |  | output file |
+| `--min-duration MIN_DURATION` |  | seconds (default 5) |
 
 ### `story select`
 

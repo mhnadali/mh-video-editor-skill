@@ -174,6 +174,16 @@ def whoosh_graph(events: list[dict], level_db: float) -> tuple[list[str], str | 
 
 # --------------------------------------------------------------------------- ambient (natural sound)
 
+def volume_stats(path: str, start: float, seconds: float) -> tuple:
+    """(mean_volume, max_volume) in dB of a window of a file's audio; (None, None) if there is no audio."""
+    r = subprocess.run([vl.find_ffmpeg()["ffmpeg"], "-hide_banner", "-nostats", "-v", "info", "-ss", f"{max(0.0, start):.3f}",
+                        "-t", f"{seconds:.3f}", "-i", vl.ffp(path), "-vn", "-af", "volumedetect", "-f", "null", "-"],
+                       capture_output=True, text=True)
+    mean = re.search(r"mean_volume:\s*(-?[\d.]+) dB", r.stderr or "")
+    peak = re.search(r"max_volume:\s*(-?[\d.]+) dB", r.stderr or "")
+    return (float(mean.group(1)) if mean else None, float(peak.group(1)) if peak else None)
+
+
 def mean_volume(path: str, start: float, seconds: float) -> float | None:
     """Mean level (dB) of a window of a file's audio, via volumedetect. None if there is no audio."""
     r = subprocess.run([vl.find_ffmpeg()["ffmpeg"], "-hide_banner", "-nostats", "-v", "info", "-ss", f"{max(0.0, start):.3f}",
