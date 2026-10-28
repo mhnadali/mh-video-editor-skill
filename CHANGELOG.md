@@ -2,6 +2,19 @@
 
 All notable changes to this project. Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [SemVer](https://semver.org/).
 
+## [0.16.0] - 2026-10-28 (selection depth)
+Why: selection is the skill's most important job. The first story-first reel still used clips shorter than 5 s, two takes of the same moment, and chose shot by shot without looking at how neighbours fit.
+
+### Added
+- **Hard filters** (`vid_filter.py`, `story exclusions`): clips under 5 s, dark, blurry, shaky, covered, with an internal cut or low quality are left out with a reason code; `pick`/`rank` also skip short clips (`--min-duration`, `--keep-repeats`).
+- **Same-moment clusters:** copies of one moment (same camera, or two cameras) are found from three window hashes, colours and light, and only the best take is kept.
+- **Usable-moment extraction** (`vid_moment.py`, `story refine`): the best segment inside each chosen clip, with the motion type (static, pan, tilt, push/pull, hand-held) and the end of the action.
+- **Sequence optimiser:** a beam search over the whole edit with pair costs (size, light, direction, colour, topic, camera); three variants (balanced, action, people); `--method greedy` keeps the 0.15 behaviour. A long single chronological chapter no longer strands the search (every clip is offered when the favourites fail).
+- **Optional offline vision plug-in** (`plugins/vision`, own virtual environment, OpenCV cascades; `vision run|status`): faces, people; the engine stays standard-library only. `score` also measures sound spikes (`transient`) and shake, texture, per-window hashes.
+- **Remembered taste** (`vid_profile.py`, `profile.json`): banned, favoured and pinned clips, capped topic / role biases and weight overrides, learned only from explicit decisions; `story select --profile / --no-profile`, `story feedback`, `story profile`.
+- **`story review`:** one offline HTML page with three-frame strips, alternates, keep / replace / ban, the energy curve against the music, and an export for `story feedback`.
+- **`engine/tools/eval_selection.py`:** a synthetic library with a known truth and floors for short clips, duplicates, best take, order, fill, coverage, distinct pictures, energy fit and people share.
+
 ## [0.15.0] - 2026-10-28 (story-first selection)
 Why: the first reel's shots were picked by eye from one thumbnail each. Audited with numbers: half of the shots came from the block that held half of the footage, a whole morning of the second day had none, the loudest music carried a plate of food and the calmest picture sat on the quiet music, only 7 of 35 shots had people, the Osmo was 17 % of the edit and 30 % of the library, and the user never saw a plan.
 

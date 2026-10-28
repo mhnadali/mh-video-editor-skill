@@ -185,7 +185,7 @@ mh_video vision run [-h] --work WORK [--only ONLY] [--frames FRAMES] [--onnx ONN
 Story-first selection: chapters, a storyboard to approve, and an audit of an EDL.
 
 ```
-mh_video story [-h] {chapters,refine,exclusions,select,audit} ...
+mh_video story [-h] {chapters,refine,exclusions,select,review,feedback,profile,audit} ...
 ```
 
 ### `story chapters`
@@ -238,7 +238,7 @@ mh_video story exclusions [-h] --work WORK [--chapters CHAPTERS] [--notes NOTES]
 Choose the shots for the chapters and the music; writes storyboard.json/.md and a clip list.
 
 ```
-mh_video story select [-h] --work WORK --beats BEATS --chapters CHAPTERS [--notes NOTES] --duration DURATION [--body-start BODY_START] [--pacing {beat,energy}] [--intro-shots INTRO_SHOTS] [--period PERIOD] [--out OUT] [--clips CLIPS] [--variant {balanced,action,people}] [--variants] [--method {beam,greedy}]
+mh_video story select [-h] --work WORK --beats BEATS --chapters CHAPTERS [--notes NOTES] --duration DURATION [--body-start BODY_START] [--pacing {beat,energy}] [--intro-shots INTRO_SHOTS] [--period PERIOD] [--out OUT] [--clips CLIPS] [--variant {balanced,action,people}] [--variants] [--method {beam,greedy}] [--profile PROFILE] [--no-profile]
 ```
 
 | Argument | Required / default | Meaning |
@@ -257,6 +257,54 @@ mh_video story select [-h] --work WORK --beats BEATS --chapters CHAPTERS [--note
 | `--variant VARIANT` | default `balanced`; one of `balanced`, `action`, `people` | how the story is told: balanced, action first, or people first |
 | `--variants` |  | write all three variants and print a comparison table |
 | `--method METHOD` | one of `beam`, `greedy` | beam = optimise the whole sequence at once (default); greedy = chapter by chapter (the 0.15 behaviour) |
+| `--profile PROFILE` |  | profile.json of remembered preferences (default: <work>/profile.json and the global one) |
+| `--no-profile` |  | ignore remembered preferences |
+
+### `story review`
+
+Write an offline HTML page to review a storyboard: frames, alternates, keep / replace / ban.
+
+```
+mh_video story review [-h] --work WORK --storyboard STORYBOARD [--out OUT] [--beats BEATS] [--notes NOTES]
+```
+
+| Argument | Required / default | Meaning |
+|---|---|---|
+| `--work WORK` | required | work folder (inventory, scores, sheets, beats live here) |
+| `--storyboard STORYBOARD` | required | storyboard.json written by `story select` |
+| `--out OUT` |  | output file |
+| `--beats BEATS` |  | beats.json from the `beats` command |
+| `--notes NOTES` |  | shot-notes.json: the agent's reading of the footage (role, mood, people, topic, shot_size ...) |
+
+### `story feedback`
+
+Apply the decisions exported from the review page: update the storyboard and learn the user's taste.
+
+```
+mh_video story feedback [-h] --work WORK --storyboard STORYBOARD --feedback FEEDBACK [--out OUT] [--profile PROFILE] [--notes NOTES]
+```
+
+| Argument | Required / default | Meaning |
+|---|---|---|
+| `--work WORK` | required | work folder (inventory, scores, sheets, beats live here) |
+| `--storyboard STORYBOARD` | required | storyboard.json written by `story select` |
+| `--feedback FEEDBACK` | required | decisions.json exported by the review page |
+| `--out OUT` |  | output file |
+| `--profile PROFILE` |  | profile.json of remembered preferences (default: <work>/profile.json and the global one) |
+| `--notes NOTES` |  | shot-notes.json: the agent's reading of the footage (role, mood, people, topic, shot_size ...) |
+
+### `story profile`
+
+Show the remembered preferences.
+
+```
+mh_video story profile [-h] --work WORK [--profile PROFILE]
+```
+
+| Argument | Required / default | Meaning |
+|---|---|---|
+| `--work WORK` | required | work folder (inventory, scores, sheets, beats live here) |
+| `--profile PROFILE` |  | profile.json of remembered preferences (default: <work>/profile.json and the global one) |
 
 ### `story audit`
 

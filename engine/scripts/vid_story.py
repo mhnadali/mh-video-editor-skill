@@ -25,6 +25,7 @@ from typing import Optional
 import vid_cutlogic as cl
 import vid_filter as vf
 import vid_plan as vp
+import vid_profile as vprof
 import vidlib as vl
 
 MOODS = {"calm": 0.25, "building": 0.55, "intense": 0.85}
@@ -265,7 +266,7 @@ def clip_view(rec: dict, score: dict, note: dict) -> dict:
             "best_start": score.get("best_start", 0.0), "action_start": action_start,
             "brightness": score.get("brightness"), "csig": score.get("csig") or [], "scene": score.get("scene"),
             "motion_dx": score.get("motion_dx"), "motion_mag": score.get("motion_mag"),
-            "faces": score.get("faces"),
+            "faces": score.get("faces"), "bias": score.get("_bias", 0.0),
             "flags": score.get("flags") or [], "internal_cut": bool(score.get("internal_cut"))}
 
 
@@ -291,6 +292,8 @@ def pool(chapter: dict, inventory: list, scores: dict, notes: dict, avoid: set, 
         if i in set(chapter.get("avoid") or []):
             continue
         why = excluded.get(i, [])
+        if "banned" in why:
+            continue                      # the user's own decision, even over `must`
         if why and i not in must:
             hard = [w for w in why if w.split(":")[0] not in SOFT_REASONS]
             if hard or not relaxed:
@@ -328,6 +331,9 @@ def _components(c: dict, target: float, chosen: list, ctx: dict) -> dict:
     if pref:
         bonus += pref
         why.append(f"favoured in this variant ({c['role']})")
+    if c.get("bias"):
+        bonus += c["bias"]
+        why.append("matches your remembered taste" if c["bias"] > 0 else "against your remembered taste")
     parts["bonus"] = bonus
     parts["bonus_why"] = why
     pen = 0.0
@@ -414,8 +420,24 @@ def pick_by_slot(cands: list, slots: list, chapter: dict, ctx: dict, chosen_glob
 
 def select(inventory: list, scores: dict, beats: dict, cfg: dict, notes: Optional[dict] = None, duration: float = 45.0,
            body_start: Optional[float] = None, pacing: Optional[str] = "energy", intro_shots: int = 2,
-           period: Optional[float] = None, variant: str = "balanced", method: Optional[str] = None) -> dict:
+           period: Optional[float] = None, variant: str = "balanced", method: Optional[str] = None,
+           profile: Optional[dict] = None) -> dict:
     cfg = validate_chapters(cfg)
+    if profile:
+        # the user's remembered taste: weights, a bias per topic / role / favoured clip, banned clips, pinned clips
+        cfg = dict(cfg, weights={**(cfg.get("weights") or {}), **profile.get("weights", {})})
+        pins = vprof.pinned(profile, inventory)
+        cfg["chapters"] = [dict(c, must=sorted(set(c.get("must") or []) | {i for i in pins if c["from"] <= i <= c["to"]}))
+                           for c in cfg["chapters"]]
+        nt0 = cl.notes_by_path(notes)
+        scores = dict(scores)
+        for rec in inventory:
+            s = scores.get(rec["index"])
+            if s and "quality" in s:
+                scores[rec["index"]] = dict(s, _bias=vprof.clip_bias(profile, clip_view(rec, s, _note(nt0, rec))))
+        banned = vprof.banned_indexes(profile, inventory)
+    else:
+        banned = set()
     if variant not in VARIANTS:
         raise vl.EngineError(f"unknown variant '{variant}' (known: {', '.join(VARIANTS)})")
     method = method or cfg.get("method", "beam")
@@ -429,7 +451,9 @@ def select(inventory: list, scores: dict, beats: dict, cfg: dict, notes: Optiona
     chapters = cfg["chapters"]
     must_all = {i for c in chapters for i in (c.get("must") or [])}
     ex = vf.exclusions(inventory, scores, notes, cfg.get("filters"), cfg.get("dedupe"), must=must_all)
-    excluded = ex["reasons"]
+    excluded = {k: list(v) for k, v in ex["reasons"].items()}
+    for i in banned:
+        excluded.setdefault(i, []).append("banned")
     slots = make_slots(beats, duration, body_start, pacing, intro_shots, period)
     teaser = cfg.get("hook") == "teaser"
     counts = allocate(chapters, slots, reserve=1 if teaser else 0, flex=cfg.get("flex", 0.3))
@@ -463,6 +487,11 @@ def select(inventory: list, scores: dict, beats: dict, cfg: dict, notes: Optiona
     if method == "beam":
         plan, shortlist = plan_slots(chapters, counts, slots, cursor, inventory, scores, nt, excluded, cfg, w, role_pref, used, warnings)
         picks, sequence_value, alts = beam_entries(plan, w, cfg, ctx, chosen_global, role_pref)
+        if plan and not picks:
+            # a long chronological chapter can strand the beam when each slot only offers its favourites: offer every clip
+            plan, shortlist = plan_slots(chapters, counts, slots, cursor, inventory, scores, nt, excluded, cfg, w, role_pref, used,
+                                         [], limit=10 ** 6)
+            picks, sequence_value, alts = beam_entries(plan, w, cfg, ctx, chosen_global, role_pref)
         if plan and not picks:
             warnings.append("no complete sequence could be built (the chronological order and the pools do not fit); "
                             "relax the chapters or the filters")
@@ -588,6 +617,7 @@ def unary_value(c: dict, target: float, chapter: dict, w: dict, role_pref: dict)
     if chapter.get("roles") and c["role"] in chapter["roles"]:
         v += w["role"]
     v += role_pref.get(c["role"], 0.0)
+    v += c.get("bias", 0.0)
     if c.get("must"):
         v += w["must"]
     return v
@@ -662,7 +692,7 @@ def beam_entries(plan: list, w: dict, cfg: dict, ctx: dict, prior: list, role_pr
 
 
 def plan_slots(chapters: list, counts: list, slots: list, cursor: int, inventory: list, scores: dict, nt: dict, excluded: dict,
-               cfg: dict, w: dict, role_pref: dict, taken: set, warnings: list) -> tuple:
+               cfg: dict, w: dict, role_pref: dict, taken: set, warnings: list, limit: int = CANDIDATES_PER_SLOT) -> tuple:
     """The per-slot candidate lists for the beam: every chapter's clips scored for each of its slots (the best
     `CANDIDATES_PER_SLOT`, plus any clip the user insisted on)."""
     plan: list = []
@@ -685,7 +715,7 @@ def plan_slots(chapters: list, counts: list, slots: list, cursor: int, inventory
         for n_slot, slot in enumerate(sl):
             target = 0.5 * slot["music"] + 0.5 * base
             unary = {v["index"]: unary_value(v, target, c, w, role_pref) for v in cands}
-            top = sorted(cands, key=lambda v: (-unary[v["index"]], v["index"]))[:CANDIDATES_PER_SLOT]
+            top = sorted(cands, key=lambda v: (-unary[v["index"]], v["index"]))[:limit]
             # the best clip of every stretch of the chapter's time as well: a chronological chapter needs choices all along it
             size = max(1, len(by_time) // max(len(sl), 1))
             for g in range(0, len(by_time), size):

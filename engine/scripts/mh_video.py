@@ -368,12 +368,49 @@ def cmd_story(a) -> int:
                 w.writerow([i, r.get("taken", ""), r.get("device", ""), round(r.get("duration") or 0, 1), " ".join(why), r["name"]])
         print(f"wrote {out} and {out.with_suffix('.csv')}: why each clip is left out")
         return 0
+    import vid_profile
+    if a.action == "profile":
+        prof = vid_profile.load_for(a.work, a.profile)
+        print(vid_profile.describe(prof))
+        return 0
+    if a.action == "feedback":
+        sb = vl.load_json(a.storyboard)
+        fb = vl.load_json(a.feedback)
+        notes_by = vid_story.cl.notes_by_path(notes)
+        views = {r["index"]: vid_story.clip_view(r, scores[r["index"]], vid_story._note(notes_by, r))      # noqa: SLF001
+                 for r in inv if r["index"] in scores and "quality" in scores[r["index"]]}
+        ppath = Path(a.profile or work / "profile.json")
+        prof, rows = vid_profile.learn(vid_profile.load(ppath), sb, fb, inv, views)
+        vid_profile.save(prof, ppath)
+        out = Path(a.out or a.storyboard)
+        vl.save_json(out, dict(sb, rows=rows))
+        out.with_suffix(".md").write_text(vid_story.storyboard_markdown(dict(sb, rows=rows)), encoding="utf-8")
+        out.with_name(out.stem + "-clips.txt").write_text(vid_story.clip_list_text(dict(sb, rows=rows)), encoding="utf-8")
+        print(vid_profile.describe(prof))
+        print(f"wrote {ppath} and the updated storyboard {out}; the next `story select` uses what was learned")
+        return 0
+    if a.action == "review":
+        import vid_review
+        sb = vl.load_json(a.storyboard)
+        out = Path(a.out or Path(a.storyboard).with_name("review.html"))
+        vid_review.write(out, sb, inv, scores, a.work, beats=beats, notes=notes, log=print)
+        print(f"wrote {out}: open it in a browser (it works offline); decide, then press 'Export decisions' and run "
+              f"`story feedback --feedback decisions.json`")
+        return 0
     cfg = vl.load_json(a.chapters)
     if a.action == "select":
         if not beats:
             raise vl.EngineError("story select needs --beats")
+        profile = None
+        if not a.no_profile:
+            profile = vid_profile.load_for(a.work, a.profile)
+            if not (profile["weights"] or profile["topics"] or profile["roles"] or profile["banned"] or profile["favoured"]
+                    or profile["pins"]):
+                profile = None
+            else:
+                print("using remembered preferences:\n" + vid_profile.describe(profile))
         kw = dict(duration=a.duration, body_start=a.body_start, pacing=a.pacing, intro_shots=a.intro_shots, period=a.period,
-                  method=a.method)
+                  method=a.method, profile=profile)
         out = Path(a.out or work / "storyboard.json")
         if a.variants:
             sbs = vid_story.select_variants(inv, scores, beats, cfg, notes, **kw)
@@ -564,6 +601,9 @@ def cmd_verify(a) -> int:
 
 ARG_HELP = {
     "frames": "frames looked at per clip",
+    "profile": "profile.json of remembered preferences (default: <work>/profile.json and the global one)",
+    "no_profile": "ignore remembered preferences",
+    "feedback": "decisions.json exported by the review page",
     "onnx": "an image-classification model of your own (ONNX); adds scene labels",
     "labels": "text file with one label per line for --onnx",
     "variant": "how the story is told: balanced, action first, or people first",
@@ -721,6 +761,17 @@ def build_parser() -> argparse.ArgumentParser:
     q.add_argument("--variants", action="store_true", help="write all three variants and print a comparison table")
     q.add_argument("--method", choices=["beam", "greedy"], default=None,
                    help="beam = optimise the whole sequence at once (default); greedy = chapter by chapter (the 0.15 behaviour)")
+    q.add_argument("--profile", help="profile.json of remembered preferences (default: <work>/profile.json and the global one)")
+    q.add_argument("--no-profile", action="store_true", help="ignore remembered preferences")
+    q = ssub.add_parser("review", help="write an offline HTML page to review a storyboard: frames, alternates, keep / replace / ban")
+    q.add_argument("--work", required=True); q.add_argument("--storyboard", required=True); q.add_argument("--out")
+    q.add_argument("--beats"); q.add_argument("--notes")
+    q = ssub.add_parser("feedback", help="apply the decisions exported from the review page: update the storyboard and learn the user's taste")
+    q.add_argument("--work", required=True); q.add_argument("--storyboard", required=True)
+    q.add_argument("--feedback", required=True, help="decisions.json exported by the review page"); q.add_argument("--out")
+    q.add_argument("--profile"); q.add_argument("--notes")
+    q = ssub.add_parser("profile", help="show the remembered preferences")
+    q.add_argument("--work", required=True); q.add_argument("--profile")
     q = ssub.add_parser("audit", help="check an EDL against the story principles (chapters, cameras, people, energy vs music, order)")
     q.add_argument("edl"); q.add_argument("--work", required=True); q.add_argument("--beats"); q.add_argument("--notes")
     q.add_argument("--chapters"); q.add_argument("--free-order", action="store_true", help="do not require the trip order")
