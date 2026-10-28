@@ -173,11 +173,11 @@ mh_video story select [-h] --work WORK --beats BEATS --chapters CHAPTERS [--note
 |---|---|---|
 | `--work WORK` | required | work folder (inventory, scores, sheets, beats live here) |
 | `--beats BEATS` | required | beats.json from the `beats` command |
-| `--chapters CHAPTERS` | required |  |
+| `--chapters CHAPTERS` | required | chapters.json: the story's chapters (name, from, to, weight, energy ...) |
 | `--notes NOTES` |  | shot-notes.json (role, mood, people, topic, shot_size, skip) |
 | `--duration DURATION` | required | override the video duration in seconds |
-| `--body-start BODY_START` |  |  |
-| `--pacing PACING` | default `energy`; one of `beat`, `energy` |  |
+| `--body-start BODY_START` |  | seconds where the beat-by-beat body starts (use the music's drop time to land the flash on the first body cut) |
+| `--pacing PACING` | default `energy`; one of `beat`, `energy` | beat = one shot per beat; energy = hold calm beats, cut fast on strong ones |
 | `--intro-shots INTRO_SHOTS` | default `2` | shots before the beat grid starts |
 | `--period PERIOD` |  | override the beat period in seconds |
 | `--out OUT` |  | output file |
@@ -196,8 +196,8 @@ mh_video story audit [-h] --work WORK [--beats BEATS] [--notes NOTES] [--chapter
 | `edl` | required | the *.edl.json file |
 | `--work WORK` | required | work folder (inventory, scores, sheets, beats live here) |
 | `--beats BEATS` |  | beats.json from the `beats` command |
-| `--notes NOTES` |  |  |
-| `--chapters CHAPTERS` |  |  |
+| `--notes NOTES` |  | shot-notes.json: the agent's reading of the footage (role, mood, people, topic, shot_size ...) |
+| `--chapters CHAPTERS` |  | chapters.json: the story's chapters (name, from, to, weight, energy ...) |
 | `--free-order` |  | do not require the trip order |
 
 ## `need`

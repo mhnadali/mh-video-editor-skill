@@ -486,6 +486,10 @@ def cmd_verify(a) -> int:
 
 
 ARG_HELP = {
+    "chapters": "chapters.json: the story's chapters (name, from, to, weight, energy ...)",
+    "body_start": "seconds where the beat-by-beat body starts (use the music's drop time to land the flash on the first body cut)",
+    "pacing": "beat = one shot per beat; energy = hold calm beats, cut fast on strong ones",
+    "notes": "shot-notes.json: the agent's reading of the footage (role, mood, people, topic, shot_size ...)",
     "folder": "folder with the footage", "work": "work folder (inventory, scores, sheets, beats live here)",
     "recursive": "also scan sub-folders", "size": "thumbnail width in pixels", "cols": "thumbnails per row",
     "rows": "rows per sheet", "audio": "music file (mp3, wav, m4a ...)", "out": "output file",

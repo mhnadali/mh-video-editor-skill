@@ -54,7 +54,7 @@ class Sizes(unittest.TestCase):
 
     def test_reframe_filters(self):
         pl = {"W": 960, "H": 540, "reframe": "cover", "focus": None}
-        self.assertEqual(vr._reframe(pl), ["scale=960:540:force_original_aspect_ratio=increase", "crop=960:540"])
+        self.assertEqual(vr._reframe(pl), ["scale=960:540:force_original_aspect_ratio=increase:flags=lanczos", "crop=960:540"])
         pl["focus"] = [0.2, 0.7]
         cover = vr._reframe(pl)
         self.assertIn("x='(iw-ow)*0.2000'", cover[1])
