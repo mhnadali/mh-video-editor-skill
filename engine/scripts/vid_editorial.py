@@ -48,19 +48,33 @@ def rgb_frames(clip: str, start: float, dur: float, n: int = 3, w: int = 16, h: 
     return [data[i * fs:(i + 1) * fs] for i in range(len(data) // fs) if len(data[i * fs:(i + 1) * fs]) == fs]
 
 
+def _hue_angle(r: float, g: float, b: float, v: float, c: float) -> float:
+    """Hue as an angle in radians (0 = red) from RGB in 0..1; grey pixels (no chroma) have weight 0 anyway."""
+    if c <= 0:
+        return 0.0
+    if v == r:
+        h = ((g - b) / c) % 6
+    elif v == g:
+        h = (b - r) / c + 2
+    else:
+        h = (r - g) / c + 4
+    return math.pi * h / 3.0
+
+
 def dominant_hue(frames: list[bytes]) -> tuple[Optional[float], float]:
     """(hue in 0..1 of the most colourful pixels, mean saturation 0..1). Hue is None for a grey picture.
 
     Pixels are weighted by their saturation, so a grey road under a blue sky reads as blue, not as nothing."""
-    import colorsys
     sx = sy = wsum = sat_total = 0.0
     count = 0
     for fr in frames:
         for i in range(0, len(fr) - 2, 3):
             r, g, b = fr[i] / 255.0, fr[i + 1] / 255.0, fr[i + 2] / 255.0
-            h, s, v = colorsys.rgb_to_hsv(r, g, b)
+            v = max(r, g, b)
+            c = v - min(r, g, b)
+            s = c / v if v > 0 else 0.0
             wgt = s * v
-            ang = 2 * math.pi * h
+            ang = _hue_angle(r, g, b, v, c)
             sx += wgt * math.cos(ang)
             sy += wgt * math.sin(ang)
             wsum += wgt
