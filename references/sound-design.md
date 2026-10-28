@@ -2,6 +2,9 @@
 
 Everything is synthesised with FFmpeg; no sound files are downloaded or bundled. Music stays the user's own file.
 
+## J-cut and L-cut (0.11)
+`shots[i].audio.lead` / `lag` (seconds, 0 to 1) move a shot's own sound earlier or later than its picture, under the music. Use a lead when the next place has a distinctive sound (engine, waves, crowd) and you want the ear to arrive first; a lag to keep the mood of the shot you are leaving. Shots with `speed` keep their sound unchanged.
+
 ## Whooshes
 ```json
 "style": {"sound_design": {"whoosh": true, "level_db": -24, "max_events": 12, "duck": true}}

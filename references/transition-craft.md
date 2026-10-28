@@ -2,7 +2,7 @@
 
 A transition says something a hard cut cannot: *time passed*, *we moved somewhere else*, *the energy changed*, *a section ended*, *look at this*. If it says none of these, use a hard cut on the beat: it is stronger. The restraint budget (`effects-and-transitions.md`) caps how many you may use; this file is about choosing the right ones.
 
-**Engine today:** every transition overlaps 4 frames (about 0.13 s at 30 fps), so all of them are *quick* blends that keep the cut on the beat. Long, slow dissolves are not available yet; for a slow moment use a hard cut after a held shot, or `fadeblack` / `fade` at the very start or end. Do not pretend a 4-frame dissolve is a slow one.
+**Duration:** the default overlap is 4 frames (about 0.13 s at 30 fps), a quick blend that keeps the cut on the beat. Per cut, `transition_frames` makes it longer (even numbers up to 24): 8 to 12 frames for a dissolve or fade in a calm stretch and for the ending, 4 to 6 for slides and wipes on energetic beats. The cut stays centred, so the beat does not move. The decision engine (`cuts`) already gives the closing fade and calm dissolves 8 frames.
 
 ## What each family means (`vidlib.TRANSITION_FAMILIES`)
 

@@ -2,6 +2,16 @@
 
 All notable changes to this project. Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [SemVer](https://semver.org/).
 
+## [0.11.0] - 2026-10-28 (cut and transition craft, phase 3: cut types in the renderer)
+### Added
+- **Per-transition duration:** EDL `transition_frames` (`{"cut": even frames 2-24}`, default 4). The overlap is split evenly over the two shots, the cut stays centred and the assembled length still equals the project length (checked on random layouts). `lint` errors when a shot cannot hold its overlaps and warns for a key with no transition. The decision engine gives the closing fade and calm dissolves 8 frames, section lifts 6, and shrinks overlaps that short shots cannot hold.
+- **J-cut / L-cut for clip sound:** `shots[i].audio.lead` / `lag` (0-1 s) with `style.ambient`; the lead is limited by the start of the video and of the source clip; retimed shots are untouched; the audio cache key changes only when they are used.
+- **Match on action:** `cuts --align` measures windows of each clip and proposes a `src_start` that continues the previous shot's movement; `--write` stores it.
+- Tests in `test_cut_types.py` (pure timing model, lint, lead/lag, alignment) and one end-to-end render with real media (runs where FFmpeg exists).
+
+### Changed
+- Opt-in only: without `transition_frames`, `lead`/`lag` or `--align` the render is identical to 0.10.0.
+
 ## [0.10.0] - 2026-10-28 (cut and transition craft, phase 2: decision engine)
 ### Added
 - **`vid_cutlogic.py`:** for every boundary between two shots it names the kind of cut and gives a one-sentence reason from the content: `impact` (the drop), `closing`, `cut-on-action`, `direction-clash`, `graphic-match`, `contrast-cut`, `size-step`, `soften`, `jump-risk`, `section-lift`, `motion-bridge`, `calm-dissolve`, `montage-cut`. Features come from the scores (shot size, camera motion, point of interest, brightness, energy, similarity) and the music sections; the agent's `shot-notes.json` overrides them. Directional slides/wipes follow the measured movement (sign convention pinned by a test).
