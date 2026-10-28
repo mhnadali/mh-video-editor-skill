@@ -32,6 +32,7 @@ MAX_SPAN = 45.0                # seconds of a clip that are analysed (around the
 GW, GH = 48, 27
 MARGIN = 0.4                   # seconds at both ends of a clip that are never chosen
 STEP = 0.25                    # sliding step of the window
+MIN_PEAK = 0.5                 # motion (mean frame difference, 0-255) below which a clip has no action peak
 DECODE_THREADS = 2
 
 _GRAPH = ("fps={fps},scale=480:-2,{tm}format=yuv420p,split=4[a][b][c][g];"
@@ -196,11 +197,17 @@ def best_segment(series: dict, length: float, want: str = "any", margin: float =
     last = n - win - keep
     if last < first:                                         # a clip as short as the segment: take what there is
         first, last = 0, max(0, n - win)
-    motion = smooth(series["motion"])
+    med = sorted(series["motion"])[len(series["motion"]) // 2] if n else 0.0
+    cut_level = max(6.0 * max(med, 0.5), 25.0)               # a frame that differs from the last one by far: a cut or a flash
+    # smoothing must not spread a cut into its neighbours and make them look like the action peak
+    motion = smooth([m if m <= cut_level else med for m in series["motion"]])
     ref = sorted(motion)[int(0.9 * (len(motion) - 1))] if motion else 1.0
     ref = max(ref, 1e-6)
-    peak = max(range(n), key=lambda i: motion[i]) if n else 0
-    med = sorted(series["motion"])[len(series["motion"]) // 2] if n else 0.0
+    # the action peak is the most eventful frame that is not a cut; a clip where nothing moves has no peak at all
+    calm_frames = [i for i in range(n) if series["motion"][i] <= cut_level]
+    peak: Optional[int] = max(calm_frames, key=lambda i: (motion[i], -i)) if calm_frames else None
+    if peak is not None and motion[peak] < MIN_PEAK:
+        peak = None
     best: Optional[dict] = None
     stride = max(1, int(round(step * fps)))
     for s in range(first, last + 1, stride):
@@ -210,17 +217,17 @@ def best_segment(series: dict, length: float, want: str = "any", margin: float =
         seg_blur = series["blur"][s:e]
         dx, dy = series["dx"][s:e], series["dy"][s:e]
         spike = max(seg_m) if seg_m else 0.0
-        cut = spike > max(6.0 * max(med, 0.5), 25.0)                 # a frame that differs from the last one by far: a cut or a flash
+        cut = spike > cut_level
         sharp = _clamp(1.0 - (_mean(seg_blur) - 2.0) / 8.0)
         luma = _mean(seg_b)
         expo = _clamp(1.0 - abs(luma - 120.0) / 120.0) * _clamp(1.0 - _std(seg_b) / 25.0)
         mdx, mdy = _mean(dx), _mean(dy)
         wob = _mean([abs(x - mdx) + abs(y - mdy) for x, y in zip(dx, dy)]) if dx else 0.0
         steady = _clamp(1.0 - wob / 4.0)
-        mot = _mean(smooth(series["motion"])[s:e]) / ref
+        mot = _mean(motion[s:e]) / ref
         fit = _clamp(mot) if want == "action" else _clamp(1.0 - mot) if want == "calm" else 0.5
-        has_peak = s <= peak < e
-        centred = 1.0 - min(1.0, abs((s + win / 2.0) - peak) / max(win, 1)) if want == "action" else 0.0
+        has_peak = peak is not None and s <= peak < e
+        centred = 1.0 - min(1.0, abs((s + win / 2.0) - peak) / max(win, 1)) if want == "action" and peak is not None else 0.5
         score = 0.25 * sharp + 0.15 * expo + 0.25 * steady + 0.25 * fit + 0.10 * (centred if want == "action" else 0.5)
         if has_peak and want == "action":
             score += 0.05
@@ -235,9 +242,9 @@ def best_segment(series: dict, length: float, want: str = "any", margin: float =
     s = best["s"]
     e = min(n, s + win)
     kind = classify_motion(series["dx"][s:e], series["dy"][s:e], series["dxl"][s:e], series["dxr"][s:e])
-    eoa = end_of_action(motion, fps, peak)
+    eoa = end_of_action(motion, fps, peak) if peak is not None else None
     return {"start": round(t0 + s / fps, 2), "length": round((e - s) / fps, 2), "score": best["score"], "parts": best["parts"],
-            "motion_type": kind, "peak_at": round(t0 + peak / fps, 2),
+            "motion_type": kind, "peak_at": None if peak is None else round(t0 + peak / fps, 2),
             "end_of_action": None if eoa is None else round(t0 + eoa, 2), "had_cut": best["cut"]}
 
 

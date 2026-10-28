@@ -51,6 +51,10 @@ def load(path: str | os.PathLike | None) -> dict:
     for k in ("banned", "favoured", "history"):
         if isinstance(data.get(k), list):
             out[k] = list(data[k])
+    try:
+        validate(out)
+    except vl.EngineError as e:
+        raise vl.EngineError(f"{path}: {e}")
     return out
 
 
@@ -84,10 +88,24 @@ def validate(profile: dict) -> dict:
         for k, v in profile.get(group, {}).items():
             if not isinstance(v, (int, float)) or isinstance(v, bool) or abs(v) > BIAS_LIMIT + 1e-9:
                 raise vl.EngineError(f"profile.{group}.{k}: a number between -{BIAS_LIMIT} and {BIAS_LIMIT}")
+    for k, v in profile.get("weights", {}).items():
+        if not isinstance(v, (int, float)) or isinstance(v, bool):
+            raise vl.EngineError(f"profile.weights.{k}: a number")
+    for p, slot in profile.get("pins", {}).items():
+        if not isinstance(slot, int) or isinstance(slot, bool) or slot < 0:
+            raise vl.EngineError(f"profile.pins: the slot of '{p}' must be a whole number >= 0")
+    for k in ("banned", "favoured"):
+        if not all(isinstance(p, str) for p in profile.get(k, [])):
+            raise vl.EngineError(f"profile.{k}: a list of file paths")
     return profile
 
 
 # --------------------------------------------------------------------------- applying a profile
+
+def norm(path: str) -> str:
+    """One spelling of a path (slashes, case on Windows) so a hand-edited profile still matches the inventory."""
+    return os.path.normcase(os.path.abspath(path))
+
 
 def clip_bias(profile: dict, view: dict) -> float:
     """What the profile adds to (or takes from) a clip's score."""
@@ -96,22 +114,22 @@ def clip_bias(profile: dict, view: dict) -> float:
         v += profile.get("topics", {}).get(view["topic"], 0.0)
     if view.get("role"):
         v += profile.get("roles", {}).get(view["role"], 0.0)
-    if view.get("path") in set(profile.get("favoured", [])):
+    if view.get("path") and norm(view["path"]) in {norm(p) for p in profile.get("favoured", [])}:
         v += FAVOUR
     return v
 
 
 def banned_indexes(profile: dict, inventory: list) -> set:
-    paths = {os.path.normcase(os.path.abspath(p)) for p in profile.get("banned", [])}
-    return {r["index"] for r in inventory if os.path.normcase(os.path.abspath(r["path"])) in paths}
+    paths = {norm(p) for p in profile.get("banned", [])}
+    return {r["index"] for r in inventory if norm(r["path"]) in paths}
 
 
 def pinned(profile: dict, inventory: list) -> dict:
     """{clip index: slot} for clips the user pinned."""
-    by_path = {os.path.normcase(os.path.abspath(r["path"])): r["index"] for r in inventory}
+    by_path = {norm(r["path"]): r["index"] for r in inventory}
     out = {}
     for p, slot in profile.get("pins", {}).items():
-        i = by_path.get(os.path.normcase(os.path.abspath(p)))
+        i = by_path.get(norm(p))
         if i is not None:
             out[i] = int(slot)
     return out
@@ -147,59 +165,89 @@ def validate_feedback(fb: dict) -> list:
     return fb["decisions"]
 
 
-def learn(profile: dict, storyboard: dict, feedback: dict, inventory: list, views: dict) -> tuple:
-    """Apply a feedback file: returns (new profile, new storyboard rows).
+def learn(profile: dict, storyboard: dict, feedback: dict, inventory: list, views: dict, min_duration: float = 5.0) -> tuple:
+    """Apply a feedback file: returns (new profile, new storyboard rows). Nothing is changed in place.
 
     `views` = {clip index: vid_story.clip_view(...)} for every clip that may be named in the feedback.
-    replace: the row takes the new clip; the topic and role of the old clip lose a little, those of the new one gain, and the
-    new clip becomes favoured. ban/unban: a clip is never / may again be used. keep: the clip is pinned to that slot.
-    prefer-topic / avoid-topic / prefer-role / avoid-role: a step of the bias. weight: sets a weight."""
+    replace: the row takes the new clip (never one used in another slot, a banned one or one under `min_duration`); the topic
+    and role of the old clip lose a little, those of the new one gain, and the new clip becomes favoured. keep: the clip is
+    pinned to that slot. ban / unban: a clip is never / may again be used; a slot that uses a banned clip takes its first
+    usable alternate (else it is marked `banned` and the next `story select` replaces it). prefer-topic / avoid-topic /
+    prefer-role / avoid-role: a step of the bias. weight: sets a weight.
+    Replacements, keeps and biases are applied first and bans last, so a clip the user replaced and banned does not teach
+    the engine to dislike its replacement."""
     prof = load_dict(profile)
     rows = [dict(r) for r in storyboard["rows"]]
     by_idx = {r["index"]: r for r in inventory}
     now = dt.datetime.now().isoformat(timespec="seconds")
-    for d in validate_feedback(feedback):
+    decisions = validate_feedback(feedback)
+    order = sorted(decisions, key=lambda d: 1 if d["action"] in ("ban", "unban") else 0)
+
+    def slot_row(n):
+        row = next((r for r in rows if r["slot"] == n), None)
+        if row is None:
+            raise vl.EngineError(f"feedback: the storyboard has no slot {n}")
+        return row
+
+    def path_of(i):
+        if i not in by_idx:
+            raise vl.EngineError(f"feedback: clip {i} is not in the inventory")
+        return by_idx[i]["path"]
+
+    def take(row, nv, kind, why):
+        row.pop("moment", None)                                   # it described the old clip
+        row.pop("banned", None)
+        row.update(clip=nv["index"], name=nv["name"], taken=nv["taken"], device=nv["device"], role=nv["role"], size=nv["size"],
+                   people=nv["people"], topic=nv["topic"], energy=round(nv["act"], 2), path=nv["path"],
+                   start=round(nv["best_start"], 2), start_kind=kind, why=why)
+
+    for d in order:
         act = d["action"]
         entry = {"when": now, "action": act}
         if act == "replace":
             slot, new = d["slot"], d["with"]
-            row = next((r for r in rows if r["slot"] == slot), None)
-            if row is None:
-                raise vl.EngineError(f"feedback: the storyboard has no slot {slot}")
+            row = slot_row(slot)
             if new not in views:
-                raise vl.EngineError(f"feedback: clip {new} is unknown")
-            old = views.get(row["clip"])
+                raise vl.EngineError(f"feedback: clip {new} is unknown or was not scored")
             nv = views[new]
+            if any(r["clip"] == new and r["slot"] != slot for r in rows):
+                raise vl.EngineError(f"feedback: clip {new} is already used in another slot; a clip appears once")
+            if norm(nv["path"]) in {norm(p) for p in prof["banned"]}:
+                raise vl.EngineError(f"feedback: clip {new} is banned")
+            if (nv.get("duration") or 0.0) < min_duration - 0.1:
+                raise vl.EngineError(f"feedback: clip {new} lasts {nv.get('duration', 0):.1f} s, under the {min_duration:g} s minimum")
+            old = views.get(row["clip"])
             if old:
                 _bump(prof["topics"], old.get("topic"), -BIAS_STEP)
                 _bump(prof["roles"], old.get("role"), -BIAS_STEP / 2)
             _bump(prof["topics"], nv.get("topic"), BIAS_STEP)
             _bump(prof["roles"], nv.get("role"), BIAS_STEP / 2)
-            if nv["path"] not in prof["favoured"]:
+            if norm(nv["path"]) not in {norm(p) for p in prof["favoured"]}:
                 prof["favoured"].append(nv["path"])
-            row.update(clip=new, name=nv["name"], taken=nv["taken"], device=nv["device"], role=nv["role"], size=nv["size"],
-                       people=nv["people"], topic=nv["topic"], energy=round(nv["act"], 2), path=nv["path"],
-                       start=round(nv["best_start"], 2), start_kind="chosen by the user", why="chosen by the user (replaced clip "
-                       f"{old['index'] if old else '?'})", alternates=[])
+            prof["pins"] = {p: s for p, s in prof["pins"].items() if norm(p) != norm(row["path"])}      # the replaced clip is released
+            prof["pins"][nv["path"]] = slot                                                              # the chosen one is kept
+            take(row, nv, "chosen by the user", f"chosen by the user (replaced clip {old['index'] if old else '?'})")
+            row["alternates"] = []
             entry.update(slot=slot, **{"from": old["index"] if old else None, "to": new})
         elif act == "ban":
-            path = by_idx[d["clip"]]["path"] if d["clip"] in by_idx else None
-            if path and path not in prof["banned"]:
+            path = path_of(d["clip"])
+            if norm(path) not in {norm(p) for p in prof["banned"]}:
                 prof["banned"].append(path)
+            prof["pins"] = {p: s for p, s in prof["pins"].items() if norm(p) != norm(path)}
+            prof["favoured"] = [p for p in prof["favoured"] if norm(p) != norm(path)]
             entry["clip"] = d["clip"]
         elif act == "unban":
-            path = by_idx[d["clip"]]["path"] if d["clip"] in by_idx else None
-            prof["banned"] = [p for p in prof["banned"] if p != path]
+            path = path_of(d["clip"])
+            prof["banned"] = [p for p in prof["banned"] if norm(p) != norm(path)]
             entry["clip"] = d["clip"]
         elif act == "keep":
-            row = next((r for r in rows if r["slot"] == d.get("slot")), None)
-            if row is not None:
-                prof["pins"][row["path"]] = row["slot"]
-                entry["slot"] = row["slot"]
+            row = slot_row(d.get("slot"))
+            prof["pins"][row["path"]] = row["slot"]
+            entry["slot"] = row["slot"]
         elif act == "unpin":
-            row = next((r for r in rows if r["slot"] == d.get("slot")), None)
-            if row is not None:
-                prof["pins"].pop(row["path"], None)
+            row = slot_row(d.get("slot"))
+            prof["pins"] = {p: s for p, s in prof["pins"].items() if norm(p) != norm(row["path"])}
+            entry["slot"] = row["slot"]
         elif act in ("prefer-topic", "avoid-topic"):
             _bump(prof["topics"], d["topic"], BIAS_STEP if act == "prefer-topic" else -BIAS_STEP)
             entry["topic"] = d["topic"]
@@ -210,6 +258,24 @@ def learn(profile: dict, storyboard: dict, feedback: dict, inventory: list, view
             prof["weights"][d["name"]] = float(d["value"])
             entry["name"] = d["name"]
         prof["history"].append(entry)
+    # every slot that still uses a banned clip (banned now or earlier) takes its first usable alternate, or is marked
+    banned_now = {norm(p) for p in prof["banned"]}
+    for row in rows:
+        if norm(row["path"]) not in banned_now:
+            if row.pop("banned", None):
+                row["why"] = "the ban was lifted"
+            continue
+        used = {r["clip"] for r in rows}
+        alt = next((a for a in row.get("alternates") or []
+                    if a in views and a not in used and norm(views[a]["path"]) not in banned_now
+                    and (views[a].get("duration") or 0.0) >= min_duration - 0.1), None)
+        if alt is None:
+            row["banned"] = True
+            row["why"] = "BANNED by the user: run `story select` again to fill this slot"
+        else:
+            was = row["clip"]
+            take(row, views[alt], "alternate after a ban", f"alternate: clip {was} was banned")
+            row["alternates"] = [a for a in row["alternates"] if a != alt]
     validate(prof)
     return prof, rows
 

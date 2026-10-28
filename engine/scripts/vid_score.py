@@ -23,6 +23,7 @@ import vidlib as vl
 WINDOW = 1.0
 POSITIONS = (0.25, 0.5, 0.75)
 ANALYSIS_WIDTH = 480
+SCHEMA = 3                  # bump when a new measurement is added: older cached entries are measured again
 DECODE_THREADS = 2          # many small decodes in parallel beat a few wide ones (measured: 15 % faster than the default)
 
 # One decode per window gives everything: exposure, motion and sharpness (metadata files) plus the tiny frames the
@@ -171,7 +172,7 @@ def score_clip(rec: dict, hw: bool = False) -> dict:
         return {"index": rec["index"], "error": "could not measure any window"}
     best = max(wins, key=lambda w: (w["quality"], w["motion"]))
     mid = best["start"] + WINDOW / 2
-    out = {"index": rec["index"], "path": rec["path"], "name": rec["name"], "size": rec.get("size"),
+    out = {"index": rec["index"], "v": SCHEMA, "path": rec["path"], "name": rec["name"], "size": rec.get("size"),
            "mtime": rec.get("mtime"), "quality": best["quality"],
            "best_start": best["start"],
            "brightness": round(best["brightness"], 1), "contrast": round(best["contrast"], 1),
@@ -250,7 +251,8 @@ def score_inventory(records: list[dict], workers: int | None = None, limit: int 
     def one(r):
         nonlocal done, reused
         old = previous.get(r["path"])
-        if old and old.get("size") == r.get("size") and old.get("mtime") == r.get("mtime") and "quality" in old                 and "flux" in old and "wins" in old and "hashes" in old:                                  # entries from before the editorial/colour/window fields are re-measured
+        current = old is not None and (old.get("v") == SCHEMA or ("flux" in old and "wins" in old and "hashes" in old))
+        if old and old.get("size") == r.get("size") and old.get("mtime") == r.get("mtime") and "quality" in old and current:
             out = dict(old)
             out["index"] = r["index"]
             reused += 1

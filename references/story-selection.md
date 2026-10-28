@@ -78,8 +78,9 @@ are found automatically; your `people` notes always win.
 `story review --work W --storyboard storyboard.json` writes one offline HTML page: a strip of three frames per chosen clip and per
 alternate, the reason for the choice, and the music's energy against the shots'. The user presses *Keep*, *Use this one* or *Ban*
 and exports `decisions.json`; `story feedback --work W --storyboard storyboard.json --feedback decisions.json` applies it (the
-storyboard changes) and remembers the taste in `profile.json`: topics and roles gain or lose a small, capped bias, replaced clips
-become favoured, banned clips are never used, kept clips are pinned. The next `story select` uses it automatically (`--profile`
+storyboard changes) and remembers the taste in `profile.json`: topics and roles gain or lose a small, capped bias, a clip chosen in place of another is favoured and pinned (it also wins over a better-measured take of the same moment),
+banned clips are never used (a slot that used one takes its first usable alternate, or is left out of the clip list until `story select` runs again),
+kept clips are pinned. A replacement can never be a clip already in the story, a banned clip or one under 5 s. The next `story select` uses it automatically (`--profile`
 to point elsewhere, `--no-profile` to ignore it; a global profile at `~/.mh-video-skill/profile.json` or `MH_PROFILE` applies to
 every project, the project's own file wins). `story profile --work W` shows what is remembered. Nothing is learned without an
 explicit decision, and the file is plain JSON the user may edit.
