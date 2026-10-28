@@ -56,11 +56,11 @@ class Core(unittest.TestCase):
         root.mkdir(exist_ok=True)
         self.assertEqual(vv.load(root), {})
         vl.save_json(root / "vision.json", {"clips": {"1": {"faces": 2, "face_area": 0.03, "bodies": 0, "people": True,
-                                                              "people_sure": True, "scene_label": "beach"},
-                                                       "2": {"faces": 0, "face_area": 0.0, "bodies": 0, "people": False}}})
+                                                              "people_sure": True, "scene_label": "beach", "path": "a.mp4"},
+                                                       "2": {"faces": 0, "face_area": 0.0, "bodies": 0, "people": False, "path": "b.mp4"}}})
         v = vv.load(root)
         self.assertEqual(sorted(v), [1, 2])
-        scores = {1: {"index": 1}, 2: {"index": 2}, 3: {"index": 3}}
+        scores = {1: {"index": 1, "path": "a.mp4"}, 2: {"index": 2, "path": "b.mp4"}, 3: {"index": 3, "path": "c.mp4"}}
         self.assertEqual(vv.merge_into_scores(scores, v), 2)
         self.assertTrue(scores[1]["person"])
         self.assertTrue(scores[1]["person_sure"])
@@ -71,6 +71,14 @@ class Core(unittest.TestCase):
         self.assertTrue(vv.is_person_clip(scores[1]))
         s = vv.summarize(v)
         self.assertEqual((s["clips"], s["with_people"], s["with_faces"], s["sure"]), (2, 1, 1, 1))
+
+    def test_a_result_for_another_file_is_ignored(self):
+        # the inventory was made again after clips were added: index 1 is now a different file
+        v = {1: {"faces": 2, "people": True, "path": "old.mp4"}, 2: {"faces": 1, "people": True}}
+        scores = {1: {"index": 1, "path": "new.mp4"}, 2: {"index": 2, "path": "x.mp4"}}
+        self.assertEqual(vv.merge_into_scores(scores, v), 0)
+        self.assertNotIn("person", scores[1])
+        self.assertNotIn("person", scores[2], "a result without a path cannot be trusted")
 
     def test_a_failing_plugin_is_reported(self):
         tmp = helpers.tmpdir() / "withvision2"

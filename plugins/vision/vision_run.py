@@ -209,6 +209,7 @@ def main(argv=None) -> int:
     ap.add_argument("--onnx")
     ap.add_argument("--labels")
     ap.add_argument("--workers", type=int, default=max(2, (os.cpu_count() or 4) // 2))
+    ap.add_argument("--force", action="store_true", help="look at every clip again, even if its earlier result is still valid")
     args = ap.parse_args(argv)
     work = Path(args.work)
     inv = json.loads((work / "inventory.json").read_text(encoding="utf-8"))["clips"]
@@ -234,16 +235,30 @@ def main(argv=None) -> int:
             prev = json.loads(out_path.read_text(encoding="utf-8")).get("clips", {})
         except ValueError:
             prev = {}
-    clips = dict(prev)
+    # indexes change when the inventory is made again (clips added or removed): an earlier result only counts while the same
+    # file still has that index, and is reused only if the file is unchanged and the same number of frames was looked at
+    by_index = {str(r["index"]): r for r in inv}
+    clips = {}
+    for k, v in prev.items():
+        r = by_index.get(k)
+        if r is not None and v.get("path") == r["path"]:
+            clips[k] = v
+    def fresh(r):
+        old = clips.get(str(r["index"]))
+        return (old is not None and not args.force and old.get("size") == r.get("size") and old.get("mtime") == r.get("mtime")
+                and old.get("asked") == args.frames and old.get("engine") == cv2.__version__ and bool(args.onnx) == old.get("onnx", False))
+    work_list = [r for r in todo if not fresh(r)]
     with ThreadPoolExecutor(args.workers) as ex:
-        for rec, res in zip(todo, ex.map(lambda r: analyse_clip(r, scores.get(r["index"]), args, cascades, net, labels), todo)):
+        for rec, res in zip(work_list, ex.map(lambda r: analyse_clip(r, scores.get(r["index"]), args, cascades, net, labels), work_list)):
+            res.update({"path": rec["path"], "size": rec.get("size"), "mtime": rec.get("mtime"), "asked": args.frames,
+                        "engine": cv2.__version__, "onnx": bool(args.onnx)})
             clips[str(rec["index"])] = res
     data = {"engine": "opencv-haar", "version": cv2.__version__, "clips": clips}
     tmp = out_path.with_suffix(".tmp")
     tmp.write_text(json.dumps(data), encoding="utf-8")
     os.replace(tmp, out_path)
     seen = [clips[str(r["index"])] for r in todo]
-    print(f"vision: looked at {len(todo)} clips; people in {sum(1 for c in seen if c['people'])}, "
+    print(f"vision: {len(work_list)} clips looked at, {len(todo) - len(work_list)} reused; people in {sum(1 for c in seen if c['people'])}, "
           f"faces in {sum(1 for c in seen if c['faces'] > 0)} -> {out_path}")
     return 0
 

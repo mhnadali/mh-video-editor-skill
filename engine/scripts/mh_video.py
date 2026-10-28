@@ -306,7 +306,7 @@ def cmd_vision(a) -> int:
             v = vid_vision.load(a.work)
             print(f"vision.json: {vid_vision.summarize(v) if v else 'not created yet (vision run)'}")
         return 0
-    v = vid_vision.run(a.work, only=a.only, onnx=a.onnx, labels=a.labels, frames=a.frames)
+    v = vid_vision.run(a.work, only=a.only, onnx=a.onnx, labels=a.labels, frames=a.frames, force=a.force)
     print(vid_vision.summarize(v))
     return 0
 
@@ -344,7 +344,7 @@ def cmd_story(a) -> int:
         for r in res["rows"]:
             m = r.get("moment") or {}
             print(f"  slot {r['slot']:>2} clip {r['clip']:>3}: start {r['start']:>6.2f}s  {m.get('motion_type', m.get('error', '?')):10} "
-                  f"score {m.get('score', '-')}  peak at {m.get('peak_at', '-')}  action ends {m.get('end_of_action', '-')}")
+                  f"score {m.get('score', '-')}  peak at {m.get('peak_at') if m.get('peak_at') is not None else '-'}  action ends {m.get('end_of_action', '-')}")
         print(f"wrote {out}, {out.with_suffix('.md')} and {clips}")
         return 0
     if a.action == "exclusions":
@@ -386,6 +386,9 @@ def cmd_story(a) -> int:
         vl.save_json(out, dict(sb, rows=rows))
         out.with_suffix(".md").write_text(vid_story.storyboard_markdown(dict(sb, rows=rows)), encoding="utf-8")
         out.with_name(out.stem + "-clips.txt").write_text(vid_story.clip_list_text(dict(sb, rows=rows)), encoding="utf-8")
+        stuck = [r['slot'] for r in rows if r.get('banned')]
+        if stuck:
+            print(f"WARNING: slot(s) {', '.join(str(s) for s in stuck)} still use a banned clip with no alternate: run `story select` again (the ban is remembered)")
         print(vid_profile.describe(prof))
         print(f"wrote {ppath} and the updated storyboard {out}; the next `story select` uses what was learned")
         return 0
@@ -603,6 +606,7 @@ ARG_HELP = {
     "frames": "frames looked at per clip",
     "profile": "profile.json of remembered preferences (default: <work>/profile.json and the global one)",
     "no_profile": "ignore remembered preferences",
+    "force": "look at every clip again, even those whose earlier result is still valid",
     "feedback": "decisions.json exported by the review page",
     "onnx": "an image-classification model of your own (ONNX); adds scene labels",
     "labels": "text file with one label per line for --onnx",
@@ -738,6 +742,7 @@ def build_parser() -> argparse.ArgumentParser:
     q.add_argument("--frames", type=int, default=9, help="frames looked at per clip")
     q.add_argument("--onnx", help="an image-classification model of your own (ONNX); adds scene labels")
     q.add_argument("--labels", help="text file with one label per line for --onnx")
+    q.add_argument("--force", action="store_true", help="look at every clip again, even those whose earlier result is still valid")
     p.set_defaults(fn=cmd_vision)
     p = sub.add_parser("story", help="story-first selection: chapters, a storyboard to approve, and an audit of an EDL")
     ssub = p.add_subparsers(dest="action", required=True)

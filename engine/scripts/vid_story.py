@@ -54,6 +54,11 @@ def weights_for(cfg: dict, variant: str = "balanced") -> dict:
 
 # --------------------------------------------------------------------------- chapters
 
+def when(taken: Optional[str], a: int = 5, b: int = 16) -> str:
+    """A slice of the capture time text ('10-08 08:03'), or '?' for a clip without a capture time."""
+    return taken[a:b] if taken else "?"
+
+
 def device_key(rec: dict) -> str:
     return (rec.get("device") or "?").strip()[:DEVICE_SHORT]
 
@@ -79,7 +84,7 @@ def propose_chapters(inventory: list, scores: dict, gap_min: float = 35.0) -> di
         minutes = sum(r.get("duration") or 0 for r in blk) / 60.0
         en = sorted((scores.get(r["index"], {}).get("energy") or 0.0) for r in blk)
         top = en[len(en) * 2 // 3:] or [0.0]
-        out.append({"name": f"Block {k + 1} ({blk[0]['taken'][5:16]} to {blk[-1]['taken'][11:16]})",
+        out.append({"name": f"Block {k + 1} ({when(blk[0].get('taken'))} to {when(blk[-1].get('taken'), 11, 16)})",
                     "from": min(r["index"] for r in blk), "to": max(r["index"] for r in blk),
                     "weight": round(math.sqrt(max(minutes, 0.1)), 2),
                     "energy": round(min(1.0, sum(top) / len(top) / 100.0), 2),
@@ -181,7 +186,7 @@ def make_slots(beats: dict, duration: float, body_start: Optional[float], pacing
     return slots
 
 
-def allocate(chapters: list, slots: list, reserve: int = 0, flex: float = 0.3) -> list:
+def allocate(chapters: list, slots: list, reserve: int = 0, flex: float = 0.3, capacity: Optional[list] = None) -> list:
     """How many consecutive slots each chapter gets, in trip order.
 
     Each chapter's wish is its weight's share of the slots. The count may move within +-`flex` (30 % by default) of the wish (never
@@ -196,6 +201,22 @@ def allocate(chapters: list, slots: list, reserve: int = 0, flex: float = 0.3) -
     flex = min(max(float(flex), 0.0), 0.9)
     lo = [max(1, int(math.floor((1.0 - flex) * t))) for t in target]
     hi = [max(l, int(math.ceil((1.0 + flex) * t))) for t, l in zip(target, lo)]
+    if capacity is not None:
+        # a chapter cannot get more shots than it has usable clips: the slots it cannot fill go to chapters that can
+        cap = [capacity[chapters.index(c)] for c in active]
+        if sum(cap) < n:
+            # not enough usable clips for the whole edit: every chapter gets all it can use (the caller warns about the rest)
+            by_name = {c["name"]: cap[i] for i, c in enumerate(active)}
+            return [by_name.get(c["name"], 0) for c in chapters]
+        lo2 = [min(l, k) for l, k in zip(lo, cap)]
+        hi2 = [min(h, k) for h, k in zip(hi, cap)]
+        while sum(hi2) < n:
+            spare = [(cap[k] - hi2[k], k) for k in range(len(active)) if cap[k] > hi2[k]]
+            if not spare:
+                break
+            hi2[max(spare)[1]] += 1
+        if sum(hi2) >= n and sum(lo2) <= n:
+            lo, hi = lo2, hi2
     if sum(lo) > n:
         raise vl.EngineError(f"{len(active)} chapters need at least {sum(lo)} slots but the edit has {n}: raise the duration, "
                              "merge chapters or give a chapter weight 0")
@@ -292,8 +313,8 @@ def pool(chapter: dict, inventory: list, scores: dict, notes: dict, avoid: set, 
         if i in set(chapter.get("avoid") or []):
             continue
         why = excluded.get(i, [])
-        if "banned" in why:
-            continue                      # the user's own decision, even over `must`
+        if any(w in ("banned", "short", "skipped", "unreadable", "copy") for w in why):
+            continue                      # never overridden, not even by `must`: a ban, a clip under the minimum length, a skip
         if why and i not in must:
             hard = [w for w in why if w.split(":")[0] not in SOFT_REASONS]
             if hard or not relaxed:
@@ -450,13 +471,23 @@ def select(inventory: list, scores: dict, beats: dict, cfg: dict, notes: Optiona
     nt = cl.notes_by_path(notes)
     chapters = cfg["chapters"]
     must_all = {i for c in chapters for i in (c.get("must") or [])}
-    ex = vf.exclusions(inventory, scores, notes, cfg.get("filters"), cfg.get("dedupe"), must=must_all)
+    prefer = set()
+    if profile:
+        fav = {vprof.norm(p) for p in profile.get("favoured", [])}
+        prefer = {r["index"] for r in inventory if vprof.norm(r["path"]) in fav} | set(vprof.pinned(profile, inventory))
+    ex = vf.exclusions(inventory, scores, notes, cfg.get("filters"), cfg.get("dedupe"), must=must_all, prefer=prefer)
     excluded = {k: list(v) for k, v in ex["reasons"].items()}
     for i in banned:
         excluded.setdefault(i, []).append("banned")
     slots = make_slots(beats, duration, body_start, pacing, intro_shots, period)
     teaser = cfg.get("hook") == "teaser"
-    counts = allocate(chapters, slots, reserve=1 if teaser else 0, flex=cfg.get("flex", 0.3))
+    capacity = [len(pool(c, inventory, scores, nt, set(), excluded, relaxed=True)) for c in chapters]
+    counts = allocate(chapters, slots, reserve=1 if teaser else 0, flex=cfg.get("flex", 0.3), capacity=capacity)
+    wished = allocate(chapters, slots, reserve=1 if teaser else 0, flex=cfg.get("flex", 0.3))
+    warnings: list = []
+    for c, got, wish, cap in zip(chapters, counts, wished, capacity):
+        if got < wish:
+            warnings.append(f"chapter '{c['name']}' has only {cap} usable clips: it gets {got} shots instead of the {wish} its weight asks for")
     lib_dev: dict = {}
     for r in inventory:
         if r.get("dup_of") is None and not r.get("error"):
@@ -466,7 +497,6 @@ def select(inventory: list, scores: dict, beats: dict, cfg: dict, notes: Optiona
            "device_share": {}, "device_library_share": {d: n / lib_total for d, n in lib_dev.items()},
            "topic_count": {}, "max_per_topic": int(cfg.get("max_per_topic", 3)), "roles": set(), "chapter_span": 1.0,
            "picked_so_far": 0}
-    warnings: list = []
     chosen_global: list = []
     entries: list = []                         # [(chapter name, view, parts, alternates, target)]
     shortlist: dict = {}                       # chapter -> the chosen clips and the best alternates, to look at in detail
@@ -809,7 +839,10 @@ def coverage(rows: list, inventory: list) -> dict:
 def clip_list_text(sb: dict) -> str:
     lines = ["# story-first selection (chronological unless a chapter says otherwise); idx = inventory index"]
     for r in sb["rows"]:
-        lines.append(f'{r["path"]} @ {r["start"]:.2f}    # slot {r["slot"]} idx {r["clip"]} {r["taken"][5:16]} {r["chapter"]}')
+        if r.get("banned"):
+            lines.append(f'# slot {r["slot"]}: idx {r["clip"]} was banned and has no alternate; run `story select` again')
+            continue
+        lines.append(f'{r["path"]} @ {r["start"]:.2f}    # slot {r["slot"]} idx {r["clip"]} {when(r.get("taken"))} {r["chapter"]}')
     return "\n".join(lines) + "\n"
 
 
@@ -822,7 +855,7 @@ def storyboard_markdown(sb: dict) -> str:
             "|---|---|---|---|---|---|---|---|---|---|---|"]
     for r in sb["rows"]:
         out.append(f"| {r['slot']} | {r['t']:.1f} | {r['len']:.2f} | {r['music']:.2f} | {r['chapter']} | {r['clip']} @ {r['start']:.1f}s "
-                   f"({r['start_kind']}) | {r['taken'][5:16]} | {r['device']} | {r['role'] or ''} | {r['why']} | "
+                   f"({r['start_kind']}) | {when(r.get('taken'))} | {r['device']} | {r['role'] or ''} | {r['why']} | "
                    f"{', '.join(str(a) for a in r['alternates'])} |")
     cv = sb["coverage"]
     out += ["", "## Coverage", f"- cameras in the edit: {cv['devices_in_edit']} (library: {cv['devices_in_library']})",
@@ -842,7 +875,7 @@ def format_storyboard(sb: dict) -> str:
     lines = [f"{'#':>2} {'time':>5} {'len':>4} {'mus':>4}  {'chapter':22} {'clip':>5} {'taken':11} {'cam':9} {'role':12} why"]
     for r in sb["rows"]:
         lines.append(f"{r['slot']:>2} {r['t']:5.1f} {r['len']:4.2f} {r['music']:4.2f}  {r['chapter'][:22]:22} {r['clip']:>5} "
-                     f"{r['taken'][5:16]:11} {r['device'][:9]:9} {(r['role'] or '-')[:12]:12} {r['why']}")
+                     f"{when(r.get('taken')):11} {(r.get('device') or '?')[:9]:9} {(r['role'] or '-')[:12]:12} {r['why']}")
     cv = sb["coverage"]
     lines.append(f"cameras {cv['devices_in_edit']} vs library {cv['devices_in_library']}; people {cv['people_share']:.0%}; roles {cv['roles']}")
     ex = sb.get("exclusions")

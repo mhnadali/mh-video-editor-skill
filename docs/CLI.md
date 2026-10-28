@@ -169,7 +169,7 @@ mh_video vision status [-h] [--work WORK]
 Look at a few frames of every clip and write vision.json (people, faces, scene labels).
 
 ```
-mh_video vision run [-h] --work WORK [--only ONLY] [--frames FRAMES] [--onnx ONNX] [--labels LABELS]
+mh_video vision run [-h] --work WORK [--only ONLY] [--frames FRAMES] [--onnx ONNX] [--labels LABELS] [--force]
 ```
 
 | Argument | Required / default | Meaning |
@@ -179,6 +179,7 @@ mh_video vision run [-h] --work WORK [--only ONLY] [--frames FRAMES] [--onnx ONN
 | `--frames FRAMES` | default `9` | frames looked at per clip |
 | `--onnx ONNX` |  | an image-classification model of your own (ONNX); adds scene labels |
 | `--labels LABELS` |  | text file with one label per line for --onnx |
+| `--force` |  | look at every clip again, even those whose earlier result is still valid |
 
 ## `story`
 

@@ -45,7 +45,7 @@ def available(plugin_dir: Optional[Path] = None) -> bool:
 
 
 def command(work: str | os.PathLike, only: Optional[str] = None, onnx: Optional[str] = None, labels: Optional[str] = None,
-            frames: int = 9, plugin_dir: Optional[Path] = None) -> list:
+            frames: int = 9, plugin_dir: Optional[Path] = None, force: bool = False) -> list:
     """The command line that runs the plug-in (separated from `run` so it can be checked without starting anything)."""
     py = plugin_python(plugin_dir)
     if py is None:
@@ -53,6 +53,8 @@ def command(work: str | os.PathLike, only: Optional[str] = None, onnx: Optional[
                              "environment and installs opencv-python-headless there), or set MH_VISION_PYTHON")
     base = Path(plugin_dir) if plugin_dir else PLUGIN_DIR
     cmd = [str(py), str(base / "vision_run.py"), "--work", str(work), "--ffmpeg", vl.find_ffmpeg()["ffmpeg"], "--frames", str(frames)]
+    if force:
+        cmd += ["--force"]
     if only:
         cmd += ["--only", only]
     if onnx:
@@ -63,9 +65,9 @@ def command(work: str | os.PathLike, only: Optional[str] = None, onnx: Optional[
 
 
 def run(work: str | os.PathLike, only: Optional[str] = None, onnx: Optional[str] = None, labels: Optional[str] = None,
-        frames: int = 9, plugin_dir: Optional[Path] = None, log=print) -> dict:
+        frames: int = 9, plugin_dir: Optional[Path] = None, log=print, force: bool = False) -> dict:
     """Run the plug-in over the inventory of `work` and return what it found."""
-    cmd = command(work, only, onnx, labels, frames, plugin_dir)
+    cmd = command(work, only, onnx, labels, frames, plugin_dir, force)
     log("running the local vision plug-in (offline) ...")
     r = subprocess.run(cmd, capture_output=True, text=True)
     if r.stdout.strip():
@@ -86,11 +88,14 @@ def load(work: str | os.PathLike) -> dict:
 
 def merge_into_scores(scores: dict, vision: dict) -> int:
     """Copy what the plug-in saw onto the score entries (faces, face_area, bodies, people, scene_label). Returns how many
-    clips were enriched. Scores of clips the plug-in did not see are left alone."""
+    clips were enriched. Scores of clips the plug-in did not see are left alone, and so is a clip whose index now belongs to
+    a different file (the inventory was made again after clips were added or removed)."""
     n = 0
     for i, v in vision.items():
         s = scores.get(i)
         if s is None:
+            continue
+        if v.get("path") is None or os.path.normcase(os.path.abspath(v["path"])) != os.path.normcase(os.path.abspath(s.get("path") or "")):
             continue
         s["faces"] = v.get("faces")
         s["face_area"] = v.get("face_area")

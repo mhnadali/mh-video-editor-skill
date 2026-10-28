@@ -85,9 +85,15 @@ const DATA = __DATA__;
 const decisions = [];
 const chosen = {};               // slot -> clip index now shown as chosen
 function el(t, c, x){const e=document.createElement(t); if(c) e.className=c; if(x!==undefined) e.textContent=x; return e;}
-function record(d){ const k = d.action+':'+(d.slot??'')+':'+(d.clip??'')+':'+(d.with??'');
-  const i = decisions.findIndex(x=>x._k===k); if(i>=0) decisions.splice(i,1); d._k=k; decisions.push(d);
+function drop(f){ for(let i=decisions.length-1;i>=0;i--) if(f(decisions[i])) decisions.splice(i,1); }
+function record(d){
+  // the last word on a slot wins: choosing another clip cancels an earlier keep or replace of that slot
+  if(d.action==='replace'||d.action==='keep') drop(x=>x.slot===d.slot&&(x.action==='replace'||x.action==='keep'));
+  if(d.action==='ban') drop(x=>x.action==='ban'&&x.clip===d.clip);
+  decisions.push(d);
   document.getElementById('count').textContent = decisions.length+' decision(s)'; }
+function markBanned(i){ DATA.rows.forEach(r=>r.clips.forEach(c=>{ if(c.index===i) c.banned=true; })); }
+const kept = {};                 // slot -> true while its clip is kept
 function render(){
   const root = document.getElementById('slots'); root.textContent='';
   DATA.rows.forEach(r=>{
@@ -102,14 +108,16 @@ function render(){
       const s = el('div','strip'); c.frames.forEach(b=>{const i=new Image(); i.src='data:image/jpeg;base64,'+b; s.append(i);}); w.append(s);
       w.append(el('div','meta','clip '+c.index+' · '+(c.name||'')+' · '+c.duration+'s'+(c.quality!=null?' · quality '+Math.round(c.quality):'')));
       if(c.index===cur){
-        const k=el('button',null,'Keep'); k.onclick=()=>{record({action:'keep',slot:r.slot}); st.textContent='kept'; st.className='state keep';}; w.append(k);
+        const k=el('button',null,kept[r.slot]?'Kept':'Keep'); k.disabled=!!kept[r.slot];
+        k.onclick=()=>{record({action:'keep',slot:r.slot}); kept[r.slot]=true; render();}; w.append(k);
       } else {
-        const u=el('button',null,'Use this one'); u.onclick=()=>{record({action:'replace',slot:r.slot,with:c.index}); chosen[r.slot]=c.index; render();}; w.append(u);
+        const u=el('button',null,c.banned?'Banned':'Use this one'); u.disabled=!!c.banned;
+        u.onclick=()=>{record({action:'replace',slot:r.slot,with:c.index}); chosen[r.slot]=c.index; kept[r.slot]=true; render();}; w.append(u);
       }
-      const b=el('button',null,'Ban'); b.onclick=()=>{record({action:'ban',clip:c.index}); c.banned=true; render();}; w.append(b);
+      if(!c.banned){ const b=el('button',null,'Ban'); b.onclick=()=>{record({action:'ban',clip:c.index}); markBanned(c.index); render();}; w.append(b); }
       row.append(w);
     });
-    const st = el('div','state'); box.append(row); box.append(st);
+    box.append(row);
     root.append(box);
   });
 }
@@ -123,7 +131,7 @@ function curve(){
 }
 document.getElementById('sub').textContent = (DATA.variant||'')+' · '+(DATA.duration||'')+' s · '+DATA.rows.length+' shots';
 document.getElementById('export').onclick=()=>{
-  const out={decisions:decisions.map(d=>{const e=Object.assign({},d); delete e._k; return e;})};
+  const out={decisions:decisions.map(d=>Object.assign({},d))};
   const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([JSON.stringify(out,null,2)],{type:'application/json'}));
   a.download='decisions.json'; a.click();
 };
@@ -136,7 +144,7 @@ def write(out: str | os.PathLike, sb: dict, inventory: list, scores: dict, work:
           beats: Optional[dict] = None, notes: Optional[dict] = None, log=print) -> Path:
     with tempfile.TemporaryDirectory(prefix="mhvid_review_") as d:
         data = build_data(sb, inventory, scores, Path(d), beats, log)
-    text = json.dumps(data, ensure_ascii=False).replace("</", "<\\/")
+    text = json.dumps(data, ensure_ascii=False).replace("</", "<\\/").replace("<!--", "<\\!--")
     out = Path(out)
     out.write_text(PAGE.replace("__DATA__", text), encoding="utf-8")
     return out

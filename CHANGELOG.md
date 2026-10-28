@@ -2,6 +2,19 @@
 
 All notable changes to this project. Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [SemVer](https://semver.org/).
 
+## [0.16.1] - 2026-10-28 (deep review of the selection depth)
+A line-by-line review of 0.16.0, a randomized check of the selection rules (thousands of random libraries, chapters, variants and profiles) and an end-to-end run on real clips. Every fix has a test (`test_deep_review.py`).
+
+### Fixed
+- **A clip the user insisted on (`must`) that was shorter than 5 s was still used.** `short`, `skipped`, `copy` and `banned` are never overridden.
+- **Chapters could be given more shots than they had usable clips**, leaving holes in the storyboard while other chapters had spare clips. The slots now go to chapters that can fill them; when the whole library is too small each chapter gives all it has (and the storyboard says so).
+- **The action peak of a clip:** on a clip where nothing moves it sat on frame 0 and pulled action slots to the start; a cut or flash (and the frames next to it after smoothing) could be taken for the peak. `peak_at` is now empty for a still clip.
+- **Remembered taste:** a clip the user chose in place of a better-measured take of the same moment lost to it on the next `story select` (now the user's clip is pinned and preferred); a replacement could duplicate a clip already in the story, be shorter than 5 s or be banned (now refused); a replacement kept the old clip's moment analysis; unknown slots or clips were silently ignored; a banned clip stayed in the storyboard (now the first usable alternate takes its place, or the slot is marked and left out of the clip list); bans were not applied when the storyboard came from an earlier round; replacing and banning in one batch taught the engine to dislike the replacement; paths with different slashes did not match; a hand-edited `profile.json` was not checked.
+- **`vision.json` was tied only to the clip's index**, which changes when clips are added and the inventory is made again: people could be attached to the wrong clips. Results now carry the file's path, size and time, are ignored for another file, and are reused when nothing changed (`vision run --force` looks again).
+- **Score cache:** reuse no longer depends on a list of field names but on a schema number, so adding a measurement later cannot silently keep or re-measure everything.
+- Clips without a capture time no longer break the storyboard, clip list and chapter names.
+- **Review page:** keep and replace of the same slot no longer both exported; a banned alternate can no longer be chosen; kept slots stay marked; `<!--` in a file name cannot break the page. The page logic is now tested in Node (skipped when Node is missing).
+
 ## [0.16.0] - 2026-10-28 (selection depth)
 Why: selection is the skill's most important job. The first story-first reel still used clips shorter than 5 s, two takes of the same moment, and chose shot by shot without looking at how neighbours fit.
 

@@ -178,8 +178,9 @@ def same_moment_clusters(inventory: list, scores: dict, cfg: Optional[dict] = No
     return sorted((sorted(g) for g in groups.values() if len(g) > 1), key=lambda g: g[0])
 
 
-def best_of(cluster: list, inventory: list, scores: dict, notes: Optional[dict] = None) -> int:
-    """The index of the best take of a cluster (the clip the agent noted first when they are close)."""
+def best_of(cluster: list, inventory: list, scores: dict, notes: Optional[dict] = None, prefer: Optional[set] = None) -> int:
+    """The index of the best take of a cluster. A take the user chose (`prefer`) beats a better-measured one."""
+    prefer = prefer or set()
     by = {r["index"]: r for r in inventory}
     nt = cl.notes_by_path(notes)
 
@@ -187,7 +188,7 @@ def best_of(cluster: list, inventory: list, scores: dict, notes: Optional[dict] 
         rec = by[i]
         note = nt.get(os.path.normcase(os.path.abspath(rec["path"]))) or {}
         skipped = 1 if note.get("skip") else 0
-        return (-skipped, quality_score(rec, scores[i], note), rec.get("duration") or 0.0, -i)
+        return (-skipped, 1 if i in prefer else 0, quality_score(rec, scores[i], note), rec.get("duration") or 0.0, -i)
 
     return max(cluster, key=key)
 
@@ -195,7 +196,8 @@ def best_of(cluster: list, inventory: list, scores: dict, notes: Optional[dict] 
 # --------------------------------------------------------------------------- all exclusions
 
 def exclusions(inventory: list, scores: dict, notes: Optional[dict] = None, filters: Optional[dict] = None,
-               dedupe: Optional[dict] = None, must: Optional[set] = None, only: Optional[set] = None) -> dict:
+               dedupe: Optional[dict] = None, must: Optional[set] = None, only: Optional[set] = None,
+               prefer: Optional[set] = None) -> dict:
     """{index: [reasons]} for every clip that must not be chosen, plus the clusters.
 
     Returns {"reasons": {index: [codes]}, "clusters": [{"keep": i, "drop": [...], "members": [...]}]}. A reason is a code
@@ -217,7 +219,7 @@ def exclusions(inventory: list, scores: dict, notes: Optional[dict] = None, filt
     live = {i: s for i, s in scores.items() if i not in reasons}
     clusters = []
     for group in same_moment_clusters(inventory, live, dedupe, only):
-        keep = best_of(group, inventory, live, notes)
+        keep = best_of(group, inventory, live, notes, prefer)
         drop = [i for i in group if i != keep and i not in must]
         for i in drop:
             reasons.setdefault(i, []).append(f"same-moment:{keep}")
