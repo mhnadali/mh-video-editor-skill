@@ -28,7 +28,7 @@ VERSION = 1
 BIAS_STEP = 0.04
 BIAS_LIMIT = 0.30
 FAVOUR = 0.15
-ACTIONS = {"keep", "replace", "ban", "prefer-topic", "avoid-topic", "prefer-role", "avoid-role", "weight", "unban", "unpin"}
+ACTIONS = {"keep", "replace", "ban", "prefer-topic", "avoid-topic", "prefer-role", "avoid-role", "weight", "unban", "unpin", "start"}
 
 
 def empty() -> dict:
@@ -160,6 +160,12 @@ def validate_feedback(fb: dict) -> list:
             raise vl.EngineError(f"feedback: '{d['action']}' needs a 'topic'")
         if d["action"] in ("prefer-role", "avoid-role") and not isinstance(d.get("role"), str):
             raise vl.EngineError(f"feedback: '{d['action']}' needs a 'role'")
+        if d["action"] == "start":
+            if not (isinstance(d.get("slot"), int) and isinstance(d.get("start"), (int, float)) and not isinstance(d["start"], bool)
+                    and d["start"] >= 0):
+                raise vl.EngineError("feedback: 'start' needs an integer 'slot' and a 'start' in seconds (0 or more)")
+            if d.get("clip") is not None and not isinstance(d["clip"], int):
+                raise vl.EngineError("feedback: the 'clip' of a 'start' must be an integer")
         if d["action"] == "weight" and not (isinstance(d.get("name"), str) and isinstance(d.get("value"), (int, float))):
             raise vl.EngineError("feedback: 'weight' needs a 'name' and a numeric 'value'")
     return fb["decisions"]
@@ -173,15 +179,17 @@ def learn(profile: dict, storyboard: dict, feedback: dict, inventory: list, view
     and role of the old clip lose a little, those of the new one gain, and the new clip becomes favoured. keep: the clip is
     pinned to that slot. ban / unban: a clip is never / may again be used; a slot that uses a banned clip takes its first
     usable alternate (else it is marked `banned` and the next `story select` replaces it). prefer-topic / avoid-topic /
-    prefer-role / avoid-role: a step of the bias. weight: sets a weight.
-    Replacements, keeps and biases are applied first and bans last, so a clip the user replaced and banned does not teach
+    prefer-role / avoid-role: a step of the bias. weight: sets a weight. start: the shot of a slot starts at this second of its
+    clip (it must be inside the clip; a start meant for a clip that is no longer in the slot is ignored).
+    Replacements are applied first (so a `start` meant for the clip they replace is recognised and ignored), then keeps, starts and
+    biases, and bans last, so a clip the user replaced and banned does not teach
     the engine to dislike its replacement."""
     prof = load_dict(profile)
     rows = [dict(r) for r in storyboard["rows"]]
     by_idx = {r["index"]: r for r in inventory}
     now = dt.datetime.now().isoformat(timespec="seconds")
     decisions = validate_feedback(feedback)
-    order = sorted(decisions, key=lambda d: 1 if d["action"] in ("ban", "unban") else 0)
+    order = sorted(decisions, key=lambda d: 0 if d["action"] == "replace" else 2 if d["action"] in ("ban", "unban") else 1)
 
     def slot_row(n):
         row = next((r for r in rows if r["slot"] == n), None)
@@ -240,6 +248,19 @@ def learn(profile: dict, storyboard: dict, feedback: dict, inventory: list, view
             path = path_of(d["clip"])
             prof["banned"] = [p for p in prof["banned"] if norm(p) != norm(path)]
             entry["clip"] = d["clip"]
+        elif act == "start":
+            row = slot_row(d["slot"])
+            if d.get("clip") is not None and d["clip"] != row["clip"]:
+                entry["action"] = "start-ignored"                 # it was set for a clip that has since been replaced
+                entry["slot"] = row["slot"]
+            else:
+                dur = (views.get(row["clip"]) or {}).get("duration") or 0.0
+                if dur and d["start"] > dur - 0.3:
+                    raise vl.EngineError(f"feedback: slot {row['slot']}: a start of {d['start']:g} s leaves nothing of a {dur:.1f} s clip")
+                row.pop("moment", None)
+                row["start"] = round(float(d["start"]), 2)
+                row["start_kind"] = "set by the user"
+                entry.update(slot=row["slot"], start=row["start"])
         elif act == "keep":
             row = slot_row(d.get("slot"))
             prof["pins"][row["path"]] = row["slot"]

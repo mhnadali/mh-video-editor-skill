@@ -79,6 +79,12 @@ Two chosen shots that only look alike (a looser reading than the one that drops 
 `story audit` also reports `drop-weak` when the shot that starts on the music's drop is a calm picture. The measured shot size is only wide or medium (63 % agreement with shots labelled by eye); a close-up comes from a large certain face or from your notes, so write `shot_size` in `shot-notes.json` for the shots that matter.
 
 ### Reviewing and teaching
+`story review` writes `review.html` and a `review_media/` folder of small proxy videos (keep them together; `--no-video` for a single
+file with frames only). The page shows the whole edit as a timeline, every chosen clip and its alternates as three frames and a
+player that starts at the shot's start, the reason for each choice, the music against the pictures, and what was left out and why.
+*Start here* sets a shot's start to the frame on screen; decisions are saved in the browser as you go and can be exported,
+re-loaded or cleared. This page is the one job in the pipeline that needs eyes, and it needs no server or install, so a separate
+desktop GUI would add nothing to it; the engine's other steps are commands.
 `story review --work W --storyboard storyboard.json` writes one offline HTML page: a strip of three frames per chosen clip and per
 alternate, the reason for the choice, and the music's energy against the shots'. The user presses *Keep*, *Use this one* or *Ban*
 and exports `decisions.json`; `story feedback --work W --storyboard storyboard.json --feedback decisions.json` applies it (the

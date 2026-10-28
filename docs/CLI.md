@@ -266,7 +266,7 @@ mh_video story select [-h] --work WORK --beats BEATS --chapters CHAPTERS [--note
 Write an offline HTML page to review a storyboard: frames, alternates, keep / replace / ban.
 
 ```
-mh_video story review [-h] --work WORK --storyboard STORYBOARD [--out OUT] [--beats BEATS] [--notes NOTES]
+mh_video story review [-h] --work WORK --storyboard STORYBOARD [--out OUT] [--beats BEATS] [--notes NOTES] [--no-video] [--workers WORKERS]
 ```
 
 | Argument | Required / default | Meaning |
@@ -276,6 +276,8 @@ mh_video story review [-h] --work WORK --storyboard STORYBOARD [--out OUT] [--be
 | `--out OUT` |  | output file |
 | `--beats BEATS` |  | beats.json from the `beats` command |
 | `--notes NOTES` |  | shot-notes.json: the agent's reading of the footage (role, mood, people, topic, shot_size ...) |
+| `--no-video` |  | a single self-contained page without proxy videos (frames only) |
+| `--workers WORKERS` |  | parallel workers for frames and proxies (default 6) |
 
 ### `story feedback`
 

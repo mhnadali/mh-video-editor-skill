@@ -1,9 +1,14 @@
-"""A page to review a storyboard before anything is rendered: one self-contained HTML file, no network.
+"""A page to review a storyboard before anything is rendered: an HTML file that works offline, no server, no network.
 
-Each slot shows the chosen clip and its alternates as a strip of three frames, why it was chosen, and three decisions:
-keep (pin it), use an alternate instead, or ban the clip. 'Export decisions' downloads a `decisions.json` that
-`story feedback` applies: the storyboard changes and the engine remembers the taste (see vid_profile.py).
-The page draws the music energy against the energy of the chosen shots, so a flat or contradicting stretch is visible at once.
+Each slot shows the chosen clip and its alternates as a strip of three frames and (unless `video=False`) a small proxy video
+of the clip that can be played and scrubbed, why the clip was chosen, and the decisions: keep it (pin it), use an alternate
+instead, ban the clip, or set its start to the frame on screen. A timeline of the whole edit (each slot as wide as its shot) jumps
+to a slot, and the music's energy is drawn against the energy of the chosen shots, so a flat or contradicting stretch is visible at
+once. Decisions are saved in the browser as you go (so closing the page loses nothing) and 'Export decisions' downloads a
+`decisions.json` that `story feedback` applies: the storyboard changes and the engine remembers the taste (see vid_profile.py).
+
+The proxies live in a folder next to the page (`<page>_media/`, about 1 MB per clip: 240 p, no sound, at most 24 s around the shot);
+keep the page and the folder together. With `video=False` the page is one self-contained file.
 """
 from __future__ import annotations
 
@@ -19,6 +24,9 @@ import vid_sheets
 import vidlib as vl
 
 FRAME = 140
+PROXY_HEIGHT = 240
+PROXY_SPAN = 24.0               # seconds of a clip that the proxy holds
+PROXY_LEAD = 6.0                # seconds before the shot that the proxy starts, so the start can be moved earlier
 
 
 def strip_for(rec: dict, workdir: Path, size: int = FRAME) -> list:
@@ -31,18 +39,51 @@ def strip_for(rec: dict, workdir: Path, size: int = FRAME) -> list:
     return out
 
 
+def proxy_window(duration: float, start: float) -> tuple:
+    """(offset, span) in seconds of the part of a clip that its proxy holds: from a little before the shot, at most PROXY_SPAN."""
+    duration = max(float(duration or 0.0), 0.0)
+    span = min(PROXY_SPAN, duration)
+    offset = max(0.0, min(float(start or 0.0) - PROXY_LEAD, duration - span))
+    return round(offset, 2), round(span, 2)
+
+
+def make_proxy(rec: dict, dest: Path, offset: float, span: float) -> bool:
+    """A small, silent H.264 copy of `span` seconds of the clip from `offset`; False if FFmpeg could not make it."""
+    vf = (vid_sheets.TONEMAP_HLG if rec.get("hdr") else "") + f"scale=-2:{PROXY_HEIGHT},fps=15,format=yuv420p"
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    r = vl.run([vl.find_ffmpeg()["ffmpeg"], "-v", "error", "-y", "-threads", "2", "-ss", f"{offset:.2f}", "-t", f"{span:.2f}",
+                "-i", rec["path"], "-an", "-vf", vf, "-c:v", "libx264", "-preset", "veryfast", "-crf", "30",
+                "-movflags", "+faststart", str(dest)], check=False)
+    return r.returncode == 0 and dest.is_file() and dest.stat().st_size > 200
+
+
 def build_data(sb: dict, inventory: list, scores: dict, workdir: Path, beats: Optional[dict] = None, log=print,
-               workers: int = 6) -> dict:
+               workers: int = 6, media_dir: Optional[Path] = None, media_url: str = "") -> dict:
+    """The data the page shows. With `media_dir` a proxy video of every clip is made there (`media_url` is the path the page
+    uses to reach the folder)."""
     by = {r["index"]: r for r in inventory}
-    shown = {}
+    shown: dict = {}
+    start_of: dict = {}
     for r in sb["rows"]:
         for i in [r["clip"]] + list(r.get("alternates") or []):
             if i in by and i not in shown:
                 shown[i] = None
+                start_of[i] = r["start"] if i == r["clip"] else (scores.get(i) or {}).get("best_start", 0.0)
     log(f"extracting frames of {len(shown)} clips ...")
     with ThreadPoolExecutor(max(1, workers)) as ex:
         for i, frames in zip(list(shown), ex.map(lambda i: strip_for(by[i], workdir), list(shown))):
             shown[i] = frames
+    proxies: dict = {}
+    if media_dir is not None:
+        log(f"making {len(shown)} proxy videos ...")
+
+        def one(i):
+            offset, span = proxy_window(by[i].get("duration"), start_of[i])
+            ok = make_proxy(by[i], media_dir / f"{i}.mp4", offset, span)
+            return i, ({"file": f"{media_url}{i}.mp4", "offset": offset} if ok else None)
+
+        with ThreadPoolExecutor(max(1, min(workers, 4))) as ex:
+            proxies = dict(ex.map(one, list(shown)))
     rows = []
     for r in sb["rows"]:
         entry = {k: r.get(k) for k in ("slot", "t", "len", "chapter", "clip", "name", "device", "role", "people", "topic",
@@ -53,11 +94,17 @@ def build_data(sb: dict, inventory: list, scores: dict, workdir: Path, beats: Op
             if rec is None:
                 continue
             sc = scores.get(i) or {}
-            clips.append({"index": i, "name": rec.get("name"), "taken": rec.get("taken"), "duration": round(rec.get("duration") or 0, 1),
-                          "quality": sc.get("quality"), "frames": shown[i]})
+            c = {"index": i, "name": rec.get("name"), "taken": rec.get("taken"), "duration": round(rec.get("duration") or 0, 1),
+                 "quality": sc.get("quality"), "frames": shown[i], "start": round(float(start_of[i]), 2)}
+            if proxies.get(i):
+                c["video"], c["voffset"] = proxies[i]["file"], proxies[i]["offset"]
+            clips.append(c)
         entry["clips"] = clips
         rows.append(entry)
-    return {"duration": sb.get("duration"), "variant": sb.get("variant"), "rows": rows}
+    ex = sb.get("exclusions") or {}
+    return {"duration": sb.get("duration"), "variant": sb.get("variant"), "rows": rows,
+            "left_out": {"by_reason": ex.get("by_reason") or {}, "clips": ex.get("clips"), "usable": ex.get("usable"),
+                         "same_moment": sb.get("same_moment") or []}}
 
 
 PAGE = """<!doctype html>
@@ -70,6 +117,8 @@ body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.45 system-ui,sans
 main{max-width:1000px;margin:0 auto;padding:16px}
 h1{font-size:20px;margin:0 0 4px}.sub{color:var(--mut);margin-bottom:12px}
 canvas{width:100%;height:90px;background:var(--card);border:1px solid var(--line);border-radius:8px}
+#timeline{display:flex;gap:2px;height:34px;margin:0 0 6px}
+#timeline div{min-width:3px;border-radius:4px;cursor:pointer;font-size:10px;color:#fff;display:flex;align-items:center;justify-content:center;overflow:hidden}
 .slot{border:1px solid var(--line);background:var(--card);border-radius:10px;padding:10px;margin:12px 0}
 .head{display:flex;flex-wrap:wrap;gap:8px;align-items:baseline;margin-bottom:6px}
 .head b{font-size:16px}.tag{color:var(--mut);font-size:13px}
@@ -78,67 +127,132 @@ canvas{width:100%;height:90px;background:var(--card);border:1px solid var(--line
 .clip{border:2px solid transparent;border-radius:8px;padding:4px}
 .clip.sel{border-color:var(--acc)}.clip.banned{opacity:.35}
 .strip{display:flex;gap:2px}.strip img{height:110px;border-radius:3px}
+video{display:block;height:240px;border-radius:4px;background:#000;margin:4px 0}
 .meta{font-size:12px;color:var(--mut);margin:3px 0}
-button{font:inherit;border:1px solid var(--line);background:var(--bg);color:var(--fg);border-radius:6px;padding:3px 9px;cursor:pointer;margin-right:4px}
-button:hover{border-color:var(--acc)}.pri{background:var(--acc);color:#fff;border-color:var(--acc)}
-.state{font-size:13px;margin-top:6px}.state.keep{color:var(--ok)}.state.ban{color:var(--ban)}
-@media (max-width:600px){.strip img{height:80px}}
+button{font:inherit;border:1px solid var(--line);background:var(--bg);color:var(--fg);border-radius:6px;padding:3px 9px;cursor:pointer;margin:2px 4px 2px 0}
+button:hover{border-color:var(--acc)}button:disabled{opacity:.5;cursor:default}.pri{background:var(--acc);color:#fff;border-color:var(--acc)}
+details{margin:14px 0}summary{cursor:pointer;color:var(--mut)}
+@media (max-width:600px){.strip img{height:80px}video{height:180px}}
 </style></head><body><main>
 <h1>Storyboard review</h1>
 <div class="sub" id="sub"></div>
+<div id="timeline"></div>
 <canvas id="curve" width="960" height="90"></canvas>
-<div class="sub">Line = energy of the chosen shots; bars = energy the music asks for.</div>
+<div class="sub">Line = energy of the chosen shots; bars = energy the music asks for. Click a block above to jump to that slot.</div>
 <div id="slots"></div>
-<p><button class="pri" id="export">Export decisions</button> <span class="sub" id="count"></span></p>
+<details id="leftout"><summary>What was left out, and why</summary><div id="leftouttext" class="sub"></div></details>
+<p><button class="pri" id="export">Export decisions</button> <button id="import">Load decisions</button>
+<button id="reset">Start over</button> <span class="sub" id="count"></span>
+<input type="file" id="file" accept="application/json" style="display:none"></p>
 <script>
 const DATA = __DATA__;
 const decisions = [];
 const chosen = {};               // slot -> clip index now shown as chosen
+const kept = {};                 // slot -> true while its clip is kept
+const started = {};              // slot -> the start (seconds) the user set
 function el(t, c, x){const e=document.createElement(t); if(c) e.className=c; if(x!==undefined) e.textContent=x; return e;}
 function drop(f){ for(let i=decisions.length-1;i>=0;i--) if(f(decisions[i])) decisions.splice(i,1); }
+const KEY = 'mh-review:' + DATA.rows.map(r=>r.clip).join(',');
+function save(){ try{ localStorage.setItem(KEY, JSON.stringify({decisions, chosen, kept, started})); }catch(e){} }
+function load(){
+  try{
+    const s = JSON.parse(localStorage.getItem(KEY)||'null'); if(!s) return;
+    restore(s);
+  }catch(e){}
+}
+function restore(s){
+  decisions.length = 0; (s.decisions||[]).forEach(d=>decisions.push(d));
+  [chosen,kept,started].forEach(o=>{ for(const k in o) delete o[k]; });
+  Object.assign(chosen, s.chosen||{}); Object.assign(kept, s.kept||{}); Object.assign(started, s.started||{});
+  (decisions.filter(d=>d.action==='ban')).forEach(d=>markBanned(d.clip));
+  document.getElementById('count').textContent = decisions.length+' decision(s)';
+}
+function rebuild(list){                      // state from a plain list of decisions (an exported file)
+  const s={decisions:[],chosen:{},kept:{},started:{}};
+  list.forEach(d=>{ s.decisions.push(d);
+    if(d.action==='replace'){ s.chosen[d.slot]=d['with']; s.kept[d.slot]=true; }
+    if(d.action==='keep') s.kept[d.slot]=true;
+    if(d.action==='start') s.started[d.slot]=d.start; });
+  restore(s); save(); render();
+}
 function record(d){
-  // the last word on a slot wins: choosing another clip cancels an earlier keep or replace of that slot
+  // the last word on a slot wins: choosing another clip cancels an earlier keep, replace or start of that slot
   if(d.action==='replace'||d.action==='keep') drop(x=>x.slot===d.slot&&(x.action==='replace'||x.action==='keep'));
+  if(d.action==='replace') { drop(x=>x.slot===d.slot&&x.action==='start'); delete started[d.slot]; }
+  if(d.action==='start') drop(x=>x.slot===d.slot&&x.action==='start');
   if(d.action==='ban') drop(x=>x.action==='ban'&&x.clip===d.clip);
   decisions.push(d);
-  document.getElementById('count').textContent = decisions.length+' decision(s)'; }
+  document.getElementById('count').textContent = decisions.length+' decision(s)';
+  save();
+}
 function markBanned(i){ DATA.rows.forEach(r=>r.clips.forEach(c=>{ if(c.index===i) c.banned=true; })); }
-const kept = {};                 // slot -> true while its clip is kept
+function clipCard(r, c, cur){
+  const w = el('div','clip'+(c.index===cur?' sel':'')+(c.banned?' banned':''));
+  const s = el('div','strip'); c.frames.forEach(b=>{const i=new Image(); i.src='data:image/jpeg;base64,'+b; s.append(i);}); w.append(s);
+  let vid = null;
+  if(c.video){
+    vid = el('video'); vid.src = c.video; vid.preload = 'metadata'; vid.controls = true; vid.muted = true; vid.loop = true;
+    if(c.frames.length) vid.poster = 'data:image/jpeg;base64,'+c.frames[0];
+    const at = (c.index===cur && started[r.slot]!==undefined) ? started[r.slot] : c.start;
+    vid.onloadedmetadata = ()=>{ vid.currentTime = Math.max(0, at - c.voffset); };
+    w.append(vid);
+  }
+  const begin = (c.index===cur && started[r.slot]!==undefined) ? started[r.slot] : c.start;
+  w.append(el('div','meta','clip '+c.index+' · '+(c.name||'')+' · '+c.duration+'s'+(c.quality!=null?' · quality '+Math.round(c.quality):'')+' · starts at '+Number(begin).toFixed(1)+'s'));
+  if(c.index===cur){
+    const k=el('button',null,kept[r.slot]?'Kept':'Keep'); k.disabled=!!kept[r.slot];
+    k.onclick=()=>{record({action:'keep',slot:r.slot}); kept[r.slot]=true; save(); render();}; w.append(k);
+    if(vid){
+      const b=el('button',null,'Start here'); b.title='use the frame on screen as the start of this shot';
+      b.onclick=()=>{ const t=Math.round((c.voffset+vid.currentTime)*100)/100; record({action:'start',slot:r.slot,clip:c.index,start:t}); started[r.slot]=t; save(); render(); };
+      w.append(b);
+    }
+  } else {
+    const u=el('button',null,c.banned?'Banned':'Use this one'); u.disabled=!!c.banned;
+    u.onclick=()=>{record({action:'replace',slot:r.slot,with:c.index}); chosen[r.slot]=c.index; kept[r.slot]=true; save(); render();}; w.append(u);
+  }
+  if(!c.banned){ const b=el('button',null,'Ban'); b.onclick=()=>{record({action:'ban',clip:c.index}); markBanned(c.index); render();}; w.append(b); }
+  return w;
+}
 function render(){
   const root = document.getElementById('slots'); root.textContent='';
   DATA.rows.forEach(r=>{
     const cur = chosen[r.slot] ?? r.clip;
-    const box = el('div','slot');
+    const box = el('div','slot'); box.id = 'slot-'+r.slot;
     const head = el('div','head'); head.append(el('b',null,'Slot '+r.slot), el('span','tag',(r.t??0).toFixed(1)+'s · '+(r.len??0).toFixed(1)+'s · '+(r.chapter||'')));
     box.append(head);
     box.append(el('div','why', r.why||''));
     if(r.lookalike && r.lookalike.length) box.append(el('div','why','Looks like the shot in slot '+r.lookalike.join(', ')+': keep only one if they show the same thing.'));
     const row = el('div','clips');
-    r.clips.forEach(c=>{
-      const w = el('div','clip'+(c.index===cur?' sel':'')+(c.banned?' banned':''));
-      const s = el('div','strip'); c.frames.forEach(b=>{const i=new Image(); i.src='data:image/jpeg;base64,'+b; s.append(i);}); w.append(s);
-      w.append(el('div','meta','clip '+c.index+' · '+(c.name||'')+' · '+c.duration+'s'+(c.quality!=null?' · quality '+Math.round(c.quality):'')));
-      if(c.index===cur){
-        const k=el('button',null,kept[r.slot]?'Kept':'Keep'); k.disabled=!!kept[r.slot];
-        k.onclick=()=>{record({action:'keep',slot:r.slot}); kept[r.slot]=true; render();}; w.append(k);
-      } else {
-        const u=el('button',null,c.banned?'Banned':'Use this one'); u.disabled=!!c.banned;
-        u.onclick=()=>{record({action:'replace',slot:r.slot,with:c.index}); chosen[r.slot]=c.index; kept[r.slot]=true; render();}; w.append(u);
-      }
-      if(!c.banned){ const b=el('button',null,'Ban'); b.onclick=()=>{record({action:'ban',clip:c.index}); markBanned(c.index); render();}; w.append(b); }
-      row.append(w);
-    });
+    r.clips.forEach(c=>row.append(clipCard(r, c, cur)));
     box.append(row);
     root.append(box);
   });
 }
+function timeline(){
+  const tl=document.getElementById('timeline'); tl.textContent='';
+  const names=[]; DATA.rows.forEach(r=>{ if(!names.includes(r.chapter)) names.push(r.chapter); });
+  DATA.rows.forEach(r=>{
+    const d=el('div',null,String(r.slot)); d.style.flex=String(Math.max(r.len||0.5,0.2));
+    d.style.background='hsl('+(names.indexOf(r.chapter)*47%360)+',45%,42%)'; d.title='slot '+r.slot+' · '+(r.chapter||'')+' · '+(r.len||0).toFixed(1)+'s';
+    d.onclick=()=>{ const t=document.getElementById('slot-'+r.slot); if(t&&t.scrollIntoView) t.scrollIntoView({behavior:'smooth',block:'start'}); };
+    tl.append(d);
+  });
+}
 function curve(){
   const cv=document.getElementById('curve'), g=cv.getContext('2d'), W=cv.width, H=cv.height, n=DATA.rows.length||1;
-  const css=getComputedStyle(document.body);
   g.clearRect(0,0,W,H);
   DATA.rows.forEach((r,k)=>{ const x=k*W/n, w=W/n-2; const h=(r.music||0)*(H-10); g.fillStyle='rgba(120,140,200,.35)'; g.fillRect(x+1,H-h,w,h); });
   g.strokeStyle='#e0651a'; g.lineWidth=2; g.beginPath();
   DATA.rows.forEach((r,k)=>{ const x=(k+.5)*W/n, y=H-5-(r.energy||0)*(H-10); k?g.lineTo(x,y):g.moveTo(x,y); }); g.stroke();
+}
+function leftOut(){
+  const lo=DATA.left_out||{}, t=document.getElementById('leftouttext'); t.textContent='';
+  const br=lo.by_reason||{};
+  const parts=Object.keys(br).map(k=>br[k]+' '+k);
+  t.append(el('div',null,(lo.usable!=null?lo.usable+' of '+lo.clips+' clips were usable. ':'')+(parts.length?'Left out: '+parts.join(', ')+'.':'')));
+  (lo.same_moment||[]).forEach(g=>t.append(el('div',null,'The same moment filmed more than once: clip '+g.keep+' kept, '+(g.drop||[]).join(', ')+' dropped.')));
+  if(!parts.length && !(lo.same_moment||[]).length) document.getElementById('leftout').style.display='none';
 }
 document.getElementById('sub').textContent = (DATA.variant||'')+' · '+(DATA.duration||'')+' s · '+DATA.rows.length+' shots';
 document.getElementById('export').onclick=()=>{
@@ -146,16 +260,23 @@ document.getElementById('export').onclick=()=>{
   const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([JSON.stringify(out,null,2)],{type:'application/json'}));
   a.download='decisions.json'; a.click();
 };
-render(); curve();
+document.getElementById('import').onclick=()=>document.getElementById('file').click();
+document.getElementById('file').onchange=(e)=>{
+  const f=e.target.files&&e.target.files[0]; if(!f) return;
+  const rd=new FileReader(); rd.onload=()=>{ try{ rebuild((JSON.parse(rd.result).decisions)||[]); }catch(err){ alert('That file is not a decisions file.'); } }; rd.readAsText(f);
+};
+document.getElementById('reset').onclick=()=>{ rebuild([]); DATA.rows.forEach(r=>r.clips.forEach(c=>{c.banned=false;})); render(); };
+load(); timeline(); render(); curve(); leftOut();
 </script></main></body></html>
 """
 
 
 def write(out: str | os.PathLike, sb: dict, inventory: list, scores: dict, work: str | os.PathLike,
-          beats: Optional[dict] = None, notes: Optional[dict] = None, log=print) -> Path:
-    with tempfile.TemporaryDirectory(prefix="mhvid_review_") as d:
-        data = build_data(sb, inventory, scores, Path(d), beats, log)
-    text = json.dumps(data, ensure_ascii=False).replace("</", "<\\/").replace("<!--", "<\\!--")
+          beats: Optional[dict] = None, notes: Optional[dict] = None, log=print, video: bool = True, workers: int = 6) -> Path:
     out = Path(out)
+    media = out.with_name(out.stem + "_media") if video else None
+    with tempfile.TemporaryDirectory(prefix="mhvid_review_") as d:
+        data = build_data(sb, inventory, scores, Path(d), beats, log, workers, media, (media.name + "/") if media else "")
+    text = json.dumps(data, ensure_ascii=False).replace("</", "<\\/").replace("<!--", "<\\!--")
     out.write_text(PAGE.replace("__DATA__", text), encoding="utf-8")
     return out
