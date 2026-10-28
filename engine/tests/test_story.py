@@ -185,7 +185,7 @@ class Selection(unittest.TestCase):
         sc[41]["internal_cut"] = True
         for i in range(30, 60):
             if i not in (40, 41):
-                sc[i]["quality"] = 20.0                            # everything else is poor: the flagged ones would otherwise win
+                sc[i]["quality"] = 60.0                            # everything else is merely fair: the flagged ones would otherwise win
         sc[40]["quality"] = sc[41]["quality"] = 99.0
         notes = {"clip44.mp4": {"skip": True}}
         sb = self.run_select(inv, sc, cfg, notes)
