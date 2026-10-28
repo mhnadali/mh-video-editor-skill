@@ -177,6 +177,16 @@ def score_clip(rec: dict, hw: bool = False) -> dict:
     tiny = best.get("tiny") or {}
     h = hash_from_pixels(tiny["hash"][0]) if tiny.get("hash") else None
     out["hash"] = h if h is not None else dhash(rec["path"], mid, bool(rec.get("hdr")))
+    # every measured window (start, quality, motion): the story selection picks the action moment of a clip, not only its
+    # most pleasant one
+    out["wins"] = [[w["start"], round(w["quality"], 1), round(w["motion"], 2)] for w in wins]
+    if rec.get("has_audio"):                       # the clip's own sound in the chosen window (engines, voices, cheering)
+        try:
+            import vid_sfx
+            db = vid_sfx.mean_volume(rec["path"], best["start"], WINDOW)
+            out["audio_db"] = None if db is None else round(db, 1)
+        except (vl.EngineError, OSError):
+            out["audio_db"] = None
     # editorial measurements (shot size, camera motion direction, saliency centroid, colour) for the 'why' of the cut,
     # taken from the frames the window pass already decoded; the slow separate decode is only the fallback
     if tiny.get("gray"):
@@ -231,7 +241,7 @@ def score_inventory(records: list[dict], workers: int | None = None, limit: int 
     def one(r):
         nonlocal done, reused
         old = previous.get(r["path"])
-        if old and old.get("size") == r.get("size") and old.get("mtime") == r.get("mtime") and "quality" in old                 and "flux" in old:                                  # entries from before the editorial/colour fields are re-measured
+        if old and old.get("size") == r.get("size") and old.get("mtime") == r.get("mtime") and "quality" in old                 and "flux" in old and "wins" in old:                                  # entries from before the editorial/colour/window fields are re-measured
             out = dict(old)
             out["index"] = r["index"]
             reused += 1
@@ -247,6 +257,9 @@ def score_inventory(records: list[dict], workers: int | None = None, limit: int 
     ok = [s for s in scores if "quality" in s]
     for s, e in zip(ok, percentile_rank([s["motion"] for s in ok])):
         s["energy"] = e
+    loud = [s for s in ok if s.get("audio_db") is not None]
+    for s, e in zip(loud, percentile_rank([s["audio_db"] for s in loud])):
+        s["sound"] = e                              # 0-100: how loud the clip's own sound is among the clips that have sound
     mark_similar(ok)
     return scores
 

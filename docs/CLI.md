@@ -14,6 +14,7 @@ Exit codes: 0 = success; 1 = a check failed (QA FAIL, lint errors, verify failed
 | [`rank`](#rank) | table of the best (or most energetic) clips |
 | [`pick`](#pick) | story-ordered candidate clip list (calm intro, build, payoff, calm end) |
 | [`beats`](#beats) | beat grid, tempo alternatives, downbeats and the drop of a music file |
+| [`story`](#story) | story-first selection: chapters, a storyboard to approve, and an audit of an EDL |
 | [`need`](#need) | how many clips a beat grid needs |
 | [`plan`](#plan) | beat grid + ordered clip list -> EDL |
 | [`cuts`](#cuts) | name the kind of cut at every boundary and why; propose transitions (dry run unless --write) |
@@ -54,7 +55,7 @@ mh_video probe [-h] --work WORK [--recursive] [--utc-offset UTC_OFFSET] [--clock
 Numbered contact sheets of the inventory (look at them to choose shots).
 
 ```
-mh_video sheets [-h] --work WORK [--size SIZE] [--cols COLS] [--rows ROWS] [--pos POS]
+mh_video sheets [-h] --work WORK [--size SIZE] [--cols COLS] [--rows ROWS] [--pos POS] [--only ONLY] [--frames {1,2,3,4}]
 ```
 
 | Argument | Required / default | Meaning |
@@ -64,6 +65,8 @@ mh_video sheets [-h] --work WORK [--size SIZE] [--cols COLS] [--rows ROWS] [--po
 | `--cols COLS` | default `8` | thumbnails per row |
 | `--rows ROWS` | default `5` | rows per sheet |
 | `--pos POS` | default `0.4` | position in each clip (0-1) of the frame shown |
+| `--only ONLY` |  | only these inventory indexes, e.g. 100-140,152 (duplicates skipped); written to sheets_selected |
+| `--frames FRAMES` | default `1`; one of `1`, `2`, `3`, `4` | frames per clip: 3 = start, middle and end side by side (see what happens inside a clip) |
 
 ## `score`
 
@@ -135,6 +138,67 @@ mh_video beats [-h] [--out OUT] [--max-seconds MAX_SECONDS] [--bpm BPM] [--beats
 | `--bpm BPM` |  | force this tempo instead of estimating it (tap-tempo / known BPM) |
 | `--beats-per-bar BEATS_PER_BAR` | default `4` | beats per bar for the downbeat grid (4 = common time, 3 = waltz) |
 | `--first-beat FIRST_BEAT` |  | time in seconds of the first beat (overrides the detected phase) |
+
+## `story`
+
+Story-first selection: chapters, a storyboard to approve, and an audit of an EDL.
+
+```
+mh_video story [-h] {chapters,select,audit} ...
+```
+
+### `story chapters`
+
+Draft chapters from the capture timeline (name them, weight them, then select).
+
+```
+mh_video story chapters [-h] --work WORK [--out OUT] [--gap GAP]
+```
+
+| Argument | Required / default | Meaning |
+|---|---|---|
+| `--work WORK` | required | work folder (inventory, scores, sheets, beats live here) |
+| `--out OUT` |  | output file |
+| `--gap GAP` | default `35.0` | minutes of pause that start a new chapter (default 35) |
+
+### `story select`
+
+Choose the shots for the chapters and the music; writes storyboard.json/.md and a clip list.
+
+```
+mh_video story select [-h] --work WORK --beats BEATS --chapters CHAPTERS [--notes NOTES] --duration DURATION [--body-start BODY_START] [--pacing {beat,energy}] [--intro-shots INTRO_SHOTS] [--period PERIOD] [--out OUT] [--clips CLIPS]
+```
+
+| Argument | Required / default | Meaning |
+|---|---|---|
+| `--work WORK` | required | work folder (inventory, scores, sheets, beats live here) |
+| `--beats BEATS` | required | beats.json from the `beats` command |
+| `--chapters CHAPTERS` | required | chapters.json: the story's chapters (name, from, to, weight, energy ...) |
+| `--notes NOTES` |  | shot-notes.json (role, mood, people, topic, shot_size, skip) |
+| `--duration DURATION` | required | override the video duration in seconds |
+| `--body-start BODY_START` |  | seconds where the beat-by-beat body starts (use the music's drop time to land the flash on the first body cut) |
+| `--pacing PACING` | default `energy`; one of `beat`, `energy` | beat = one shot per beat; energy = hold calm beats, cut fast on strong ones |
+| `--intro-shots INTRO_SHOTS` | default `2` | shots before the beat grid starts |
+| `--period PERIOD` |  | override the beat period in seconds |
+| `--out OUT` |  | output file |
+| `--clips CLIPS` |  | text file: one clip path per line, optional ` @ seconds` |
+
+### `story audit`
+
+Check an EDL against the story principles (chapters, cameras, people, energy vs music, order).
+
+```
+mh_video story audit [-h] --work WORK [--beats BEATS] [--notes NOTES] [--chapters CHAPTERS] [--free-order] edl
+```
+
+| Argument | Required / default | Meaning |
+|---|---|---|
+| `edl` | required | the *.edl.json file |
+| `--work WORK` | required | work folder (inventory, scores, sheets, beats live here) |
+| `--beats BEATS` |  | beats.json from the `beats` command |
+| `--notes NOTES` |  | shot-notes.json: the agent's reading of the footage (role, mood, people, topic, shot_size ...) |
+| `--chapters CHAPTERS` |  | chapters.json: the story's chapters (name, from, to, weight, energy ...) |
+| `--free-order` |  | do not require the trip order |
 
 ## `need`
 
