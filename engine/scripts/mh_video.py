@@ -297,12 +297,28 @@ def cmd_qa(a) -> int:
     return 1 if rep["verdict"] == "fail" else 0
 
 
+def cmd_vision(a) -> int:
+    import vid_vision
+    if a.action == "status":
+        py = vid_vision.plugin_python()
+        print(f"vision plug-in: {'ready (' + str(py) + ')' if py else 'not set up (python plugins/vision/setup.py)'}")
+        if a.work:
+            v = vid_vision.load(a.work)
+            print(f"vision.json: {vid_vision.summarize(v) if v else 'not created yet (vision run)'}")
+        return 0
+    v = vid_vision.run(a.work, only=a.only, onnx=a.onnx, labels=a.labels, frames=a.frames)
+    print(vid_vision.summarize(v))
+    return 0
+
+
 def cmd_story(a) -> int:
     import vid_probe
     import vid_score
     import vid_story
+    import vid_vision
     inv = vid_probe.load_inventory(a.work)
     scores = vid_score.load_scores(a.work)
+    vid_vision.merge_into_scores(scores, vid_vision.load(a.work))             # people and faces, if the plug-in was run
     work = Path(a.work)
     if a.action == "chapters":
         cfg = vid_story.propose_chapters(inv, scores, a.gap)
@@ -547,6 +563,9 @@ def cmd_verify(a) -> int:
 
 
 ARG_HELP = {
+    "frames": "frames looked at per clip",
+    "onnx": "an image-classification model of your own (ONNX); adds scene labels",
+    "labels": "text file with one label per line for --onnx",
     "variant": "how the story is told: balanced, action first, or people first",
     "variants": "write all three variants and print a comparison table",
     "method": "beam = optimise the whole sequence at once; greedy = chapter by chapter",
@@ -670,6 +689,16 @@ def build_parser() -> argparse.ArgumentParser:
                    help="choose cuts and transitions from the content of each shot pair, with a written reason (needs --scores)")
     p.add_argument("--notes", help="shot-notes.json written by the agent (overrides measurements; with --smart-transitions)")
     p.set_defaults(fn=cmd_plan)
+    p = sub.add_parser("vision", help="optional local, offline detection of people and faces (a plug-in with its own environment)")
+    vsub = p.add_subparsers(dest="action", required=True)
+    q = vsub.add_parser("status", help="is the plug-in set up, and has it been run on this work folder?")
+    q.add_argument("--work")
+    q = vsub.add_parser("run", help="look at a few frames of every clip and write vision.json (people, faces, scene labels)")
+    q.add_argument("--work", required=True); q.add_argument("--only", help="inventory indexes, e.g. 100-330,420")
+    q.add_argument("--frames", type=int, default=9, help="frames looked at per clip")
+    q.add_argument("--onnx", help="an image-classification model of your own (ONNX); adds scene labels")
+    q.add_argument("--labels", help="text file with one label per line for --onnx")
+    p.set_defaults(fn=cmd_vision)
     p = sub.add_parser("story", help="story-first selection: chapters, a storyboard to approve, and an audit of an EDL")
     ssub = p.add_subparsers(dest="action", required=True)
     q = ssub.add_parser("chapters", help="draft chapters from the capture timeline (name them, weight them, then select)")

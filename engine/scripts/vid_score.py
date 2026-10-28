@@ -269,6 +269,9 @@ def score_inventory(records: list[dict], workers: int | None = None, limit: int 
     loud = [s for s in ok if s.get("audio_db") is not None]
     for s, e in zip(loud, percentile_rank([s["audio_db"] for s in loud])):
         s["sound"] = e                              # 0-100: how loud the clip's own sound is among the clips that have sound
+    bursty = [s for s in loud if s.get("audio_peak_db") is not None]
+    for s, e in zip(bursty, percentile_rank([s["audio_peak_db"] - s["audio_db"] for s in bursty])):
+        s["transient"] = e                          # 0-100: how much the sound spikes above its own level (engines revving, cheering, a crash)
     mark_similar(ok)
     return scores
 

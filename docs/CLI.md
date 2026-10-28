@@ -14,6 +14,7 @@ Exit codes: 0 = success; 1 = a check failed (QA FAIL, lint errors, verify failed
 | [`rank`](#rank) | table of the best (or most energetic) clips |
 | [`pick`](#pick) | story-ordered candidate clip list (calm intro, build, payoff, calm end) |
 | [`beats`](#beats) | beat grid, tempo alternatives, downbeats and the drop of a music file |
+| [`vision`](#vision) | optional local, offline detection of people and faces (a plug-in with its own environment) |
 | [`story`](#story) | story-first selection: chapters, a storyboard to approve, and an audit of an EDL |
 | [`need`](#need) | how many clips a beat grid needs |
 | [`plan`](#plan) | beat grid + ordered clip list -> EDL |
@@ -142,6 +143,42 @@ mh_video beats [-h] [--out OUT] [--max-seconds MAX_SECONDS] [--bpm BPM] [--beats
 | `--bpm BPM` |  | force this tempo instead of estimating it (tap-tempo / known BPM) |
 | `--beats-per-bar BEATS_PER_BAR` | default `4` | beats per bar for the downbeat grid (4 = common time, 3 = waltz) |
 | `--first-beat FIRST_BEAT` |  | time in seconds of the first beat (overrides the detected phase) |
+
+## `vision`
+
+Optional local, offline detection of people and faces (a plug-in with its own environment).
+
+```
+mh_video vision [-h] {status,run} ...
+```
+
+### `vision status`
+
+Is the plug-in set up, and has it been run on this work folder?.
+
+```
+mh_video vision status [-h] [--work WORK]
+```
+
+| Argument | Required / default | Meaning |
+|---|---|---|
+| `--work WORK` |  | work folder (inventory, scores, sheets, beats live here) |
+
+### `vision run`
+
+Look at a few frames of every clip and write vision.json (people, faces, scene labels).
+
+```
+mh_video vision run [-h] --work WORK [--only ONLY] [--frames FRAMES] [--onnx ONNX] [--labels LABELS]
+```
+
+| Argument | Required / default | Meaning |
+|---|---|---|
+| `--work WORK` | required | work folder (inventory, scores, sheets, beats live here) |
+| `--only ONLY` |  | inventory indexes, e.g. 100-330,420 |
+| `--frames FRAMES` | default `9` | frames looked at per clip |
+| `--onnx ONNX` |  | an image-classification model of your own (ONNX); adds scene labels |
+| `--labels LABELS` |  | text file with one label per line for --onnx |
 
 ## `story`
 

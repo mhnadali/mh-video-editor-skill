@@ -35,7 +35,7 @@ DEVICE_SHORT = 12
 # How much each consideration counts. A variant (or a `weights` object in chapters.json) changes some of them.
 WEIGHTS = {"quality": 0.30, "fit": 0.28, "sound": 0.08, "spread": 0.10, "people": 0.20, "camera": 0.12, "role": 0.15,
            "scene": 0.6, "topic": 0.5, "size": 0.12, "topic_run": 0.25, "flow": 1.0, "clash": 0.15, "colour": 0.08,
-           "transition": 1.0, "must": 2.0}
+           "transition": 1.0, "must": 2.0, "event": 0.05}
 
 VARIANTS = {
     "balanced": {"weights": {}, "role_pref": {}, "min_people_share": None},
@@ -235,6 +235,17 @@ def _note(notes: dict, rec: dict) -> dict:
     return notes.get(os.path.normcase(os.path.abspath(rec["path"]))) or {}
 
 
+def _people(note: dict, score: dict) -> bool:
+    """Is a person in the clip? The agent's note decides when it says so (`people` true or false, or role portrait); else the
+    local vision plug-in's judgement (faces or bodies seen); else no."""
+    if "people" in note:
+        return bool(note["people"]) or note.get("role") == "portrait"
+    if note.get("role") == "portrait":
+        return True
+    seen = score.get("person")
+    return bool(seen) if seen is not None else False
+
+
 def clip_view(rec: dict, score: dict, note: dict) -> dict:
     """The few numbers the selection reasons about, merged from the measurement and the agent's notes."""
     mood = note.get("mood")
@@ -243,12 +254,14 @@ def clip_view(rec: dict, score: dict, note: dict) -> dict:
     size = "close" if size == "detail" else size
     wins = score.get("wins") or []
     action_start = max(wins, key=lambda w: w[2])[0] if wins else score.get("best_start", 0.0)
+    role = note.get("role") or ("portrait" if (score.get("face_area") or 0.0) >= 0.04 and (score.get("faces") or 0) >= 1 else None)
     return {"index": rec["index"], "path": rec["path"], "name": rec.get("name"), "taken": rec.get("taken"),
             "epoch": rec.get("taken_epoch") or 0.0, "device": device_key(rec), "duration": rec.get("duration") or 0.0,
             "quality": (score.get("quality") or 0.0) / 100.0, "act": act,
             "sound": None if score.get("sound") is None else score["sound"] / 100.0,
-            "hash": score.get("hash"), "size": size, "role": note.get("role"), "topic": note.get("topic"),
-            "people": bool(note.get("people")) or note.get("role") == "portrait",
+            "transient": None if score.get("transient") is None else score["transient"] / 100.0,
+            "hash": score.get("hash"), "size": size, "role": role, "topic": note.get("topic"),
+            "people": _people(note, score),
             "best_start": score.get("best_start", 0.0), "action_start": action_start,
             "brightness": score.get("brightness"), "csig": score.get("csig") or [], "scene": score.get("scene"),
             "motion_dx": score.get("motion_dx"), "motion_mag": score.get("motion_mag"),
@@ -570,6 +583,8 @@ def transition_value(hist: list, cur: dict, w: dict) -> tuple:
 
 def unary_value(c: dict, target: float, chapter: dict, w: dict, role_pref: dict) -> float:
     v = w["quality"] * c["quality"] + w["fit"] * (1.0 - abs(c["act"] - target)) + (w["sound"] * c["sound"] if c["sound"] is not None else 0.0)
+    if c.get("transient") is not None and target >= 0.5:
+        v += w["event"] * c["transient"]                  # a spike of sound (cheering, an engine) belongs under a strong moment
     if chapter.get("roles") and c["role"] in chapter["roles"]:
         v += w["role"]
     v += role_pref.get(c["role"], 0.0)
