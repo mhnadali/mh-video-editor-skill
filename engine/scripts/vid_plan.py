@@ -223,7 +223,7 @@ def plan(clips: list[dict], beats: dict, *, name: str = "video", music: str | No
     if beats.get("drop_beat") is not None:
         drop_abs_t = phase_t + beats["drop_beat"] * period
         db = round((drop_abs_t - t0) / period)
-        if db >= 1:
+        if db >= 0:                                  # 0 = the drop opens the body: the flash lands on the first body cut
             drop_beat = int(db)
             target = t0 + db * period
             for j, cut in enumerate(lay["cuts"], start=1):

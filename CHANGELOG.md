@@ -2,6 +2,18 @@
 
 All notable changes to this project. Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [SemVer](https://semver.org/).
 
+## [0.13.0] - 2026-10-28 (first real trip: capture time, chronological inventory, fixes found on real footage)
+### Added
+- **Capture time:** `probe` reads the device and the capture time (Apple local time with its offset, or the container's UTC time), builds one comparable timeline across cameras, writes `timeline.csv` (gap to the previous clip) and **numbers the inventory in capture order**. `--utc-offset` and repeatable `--clock-shift DEVICE=MINUTES` correct a camera with a wrong clock or time zone (found on a trip: the Osmo Pocket 3 was 30 minutes off; the clips of the same breakfast only interleaved once corrected).
+- `need` / `plan --body-start SECONDS`: start the beat-by-beat body at a chosen time, for example at the music's drop.
+- `qa --notes shot-notes.json`: the agent's shot sizes and movement override the measurements in the editorial checks.
+
+### Fixed (found by running the engine on 486 real clips)
+- **`qa` crashed with `KeyError: 'id'`** whenever an editorial warning existed (editorial checks were keyed by `code`, the report prints `id`); never seen in CI because synthetic clips produced no editorial warning.
+- **A drop that opens the body (`drop_beat` 0) got no flash**; the planner required the drop to be at least one beat into the body.
+- **`graphic-match` fired on 19 of 34 cuts** because most points of interest are near the middle of the frame; it now needs one point clearly off-centre. **`colour-match`** is switched off when most shots share one dominant colour (a desert).
+- Regression tests for each.
+
 ## [0.12.1] - 2026-10-28 (debug pass over 0.9-0.12)
 ### Fixed
 - **QA false errors on long dips:** the black/white frames of a `fadeblack` / `fadewhite` with a longer `transition_frames` were reported as unplanned (the expected window was fixed at +-0.15 s); it now follows the real overlap.

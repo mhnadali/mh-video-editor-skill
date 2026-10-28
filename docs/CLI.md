@@ -38,7 +38,7 @@ mh_video doctor [-h]
 Inventory a footage folder (duration, rotation, fps, HDR, duplicates).
 
 ```
-mh_video probe [-h] --work WORK [--recursive] folder
+mh_video probe [-h] --work WORK [--recursive] [--utc-offset UTC_OFFSET] [--clock-shift DEVICE=MINUTES] folder
 ```
 
 | Argument | Required / default | Meaning |
@@ -46,6 +46,8 @@ mh_video probe [-h] --work WORK [--recursive] folder
 | `folder` | required | folder with the footage |
 | `--work WORK` | required | work folder (inventory, scores, sheets, beats live here) |
 | `--recursive` |  | also scan sub-folders |
+| `--utc-offset UTC_OFFSET` | default `3.5` | hours added to a camera's UTC creation time to get local time (Iran 3.5); phones that store local time ignore it |
+| `--clock-shift DEVICE=MINUTES` |  | minutes added to the times of a camera whose clock or time zone was wrong, e.g. DJI=30 (repeatable) |
 
 ## `sheets`
 
@@ -139,7 +141,7 @@ mh_video beats [-h] [--out OUT] [--max-seconds MAX_SECONDS] [--bpm BPM] [--beats
 How many clips a beat grid needs.
 
 ```
-mh_video need [-h] [--duration DURATION] [--period PERIOD] [--intro-shots INTRO_SHOTS] [--pacing {beat,energy}] [--follow-tempo] beats
+mh_video need [-h] [--duration DURATION] [--period PERIOD] [--intro-shots INTRO_SHOTS] [--body-start BODY_START] [--pacing {beat,energy}] [--follow-tempo] beats
 ```
 
 | Argument | Required / default | Meaning |
@@ -148,6 +150,7 @@ mh_video need [-h] [--duration DURATION] [--period PERIOD] [--intro-shots INTRO_
 | `--duration DURATION` |  | override the video duration in seconds |
 | `--period PERIOD` |  | override the beat period in seconds |
 | `--intro-shots INTRO_SHOTS` | default `2` | shots before the beat grid starts |
+| `--body-start BODY_START` |  | seconds where the beat-by-beat body starts (default about 11 percent in); use the music's drop time to land the flash on the first body cut |
 | `--pacing PACING` | one of `beat`, `energy` | energy = hold calm beats, cut fast on strong ones (Track B) |
 | `--follow-tempo` |  | place cuts on the variable-tempo grid (beats_refined), so late cuts do not drift (Track C) |
 
@@ -156,7 +159,7 @@ mh_video need [-h] [--duration DURATION] [--period PERIOD] [--intro-shots INTRO_
 Beat grid + ordered clip list -> EDL.
 
 ```
-mh_video plan [-h] --beats BEATS --clips CLIPS --out OUT [--name NAME] [--music MUSIC] [--preset PRESET] [--duration DURATION] [--period PERIOD] [--intro-shots INTRO_SHOTS] [--grade GRADE] [--no-transitions] [--bar-align] [--pacing {beat,energy}] [--follow-tempo] [--scores SCORES] [--smart-transitions] [--notes NOTES]
+mh_video plan [-h] --beats BEATS --clips CLIPS --out OUT [--name NAME] [--music MUSIC] [--preset PRESET] [--duration DURATION] [--period PERIOD] [--intro-shots INTRO_SHOTS] [--grade GRADE] [--no-transitions] [--bar-align] [--body-start BODY_START] [--pacing {beat,energy}] [--follow-tempo] [--scores SCORES] [--smart-transitions] [--notes NOTES]
 ```
 
 | Argument | Required / default | Meaning |
@@ -173,6 +176,7 @@ mh_video plan [-h] --beats BEATS --clips CLIPS --out OUT [--name NAME] [--music 
 | `--grade GRADE` | default `warm-desert` | look or preset name |
 | `--no-transitions` |  | hard cuts only |
 | `--bar-align` |  | start the body on a downbeat (needs bar_phase in beats.json) |
+| `--body-start BODY_START` |  | seconds where the beat-by-beat body starts (default about 11 percent in); use the music's drop time to land the flash on the first body cut |
 | `--pacing PACING` | one of `beat`, `energy` | energy = hold calm beats, cut fast on strong ones (Track B) |
 | `--follow-tempo` |  | place cuts on the variable-tempo grid (beats_refined), so late cuts do not drift (Track C) |
 | `--scores SCORES` |  | work folder containing scores.json: fill src_start from each clip's best window |
@@ -244,7 +248,7 @@ mh_video render [-h] [--out OUT] [--preview] [--encoder {auto,libx264,nvenc,vide
 Quality gate on a rendered video: defects, loudness, cut timing, effect audit.
 
 ```
-mh_video qa [-h] [--edl EDL] [--scores SCORES] [--json JSON] [--sheet SHEET] [--strict] video
+mh_video qa [-h] [--edl EDL] [--scores SCORES] [--json JSON] [--sheet SHEET] [--notes NOTES] [--strict] video
 ```
 
 | Argument | Required / default | Meaning |
@@ -254,6 +258,7 @@ mh_video qa [-h] [--edl EDL] [--scores SCORES] [--json JSON] [--sheet SHEET] [--
 | `--scores SCORES` |  | work folder with scores.json (audits clip quality) |
 | `--json JSON` |  | where to write the report (default: next to the video) |
 | `--sheet SHEET` |  | contact sheet file |
+| `--notes NOTES` |  | shot-notes.json: the agent's shot sizes and movement override the measurements in the editorial checks |
 | `--strict` |  | exit 1 on warnings as well |
 
 ## `verify`

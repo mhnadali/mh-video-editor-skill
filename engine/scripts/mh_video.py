@@ -79,7 +79,13 @@ def cmd_doctor(a) -> int:
 
 def cmd_probe(a) -> int:
     import vid_probe
-    recs = vid_probe.scan(a.folder, a.recursive)
+    shifts = {}
+    for item in a.clock_shift or []:
+        key, _, minutes = item.rpartition("=")
+        if not key or not minutes.lstrip("+-").isdigit():
+            raise vl.EngineError(f"--clock-shift expects DEVICE=MINUTES (for example DJI=30), got '{item}'")
+        shifts[key] = int(minutes)
+    recs = vid_probe.scan(a.folder, a.recursive, utc_offset_min=int(round(a.utc_offset * 60)), device_shift_min=shifts)
     paths = vid_probe.write_inventory(recs, a.work)
     print(json.dumps(vid_probe.summarize(recs), indent=2))
     print(f"inventory: {paths['json']}")
@@ -188,7 +194,8 @@ def cmd_pick(a) -> int:
 def cmd_need(a) -> int:
     import vid_plan
     beats = vl.load_json(a.beats)
-    body_t0 = vid_plan.body_start_time(beats, a.duration or beats["duration"], a.period or beats["period"], a.intro_shots)
+    body_t0 = vid_plan.body_start_time(beats, a.duration or beats["duration"], a.period or beats["period"], a.intro_shots,
+                                       body_start=a.body_start)
     if a.follow_tempo:
         lay = vid_plan.layout_from_beats(beats, a.duration or beats["duration"], body_t0, a.intro_shots)
     elif a.pacing == "energy":
@@ -211,7 +218,7 @@ def cmd_plan(a) -> int:
     edl = vid_plan.plan(clips, beats, name=a.name, music=a.music or beats.get("file"), preset=a.preset,
                         duration=a.duration, intro_shots=a.intro_shots, period=a.period, grade=a.grade,
                         transitions=not a.no_transitions, align_bars=a.bar_align, pacing=a.pacing,
-                        follow_tempo=a.follow_tempo)
+                        follow_tempo=a.follow_tempo, body_start=a.body_start)
     if a.smart_transitions:
         if a.no_transitions:
             raise vl.EngineError("--smart-transitions and --no-transitions contradict each other; use one")
@@ -255,7 +262,8 @@ def cmd_qa(a) -> int:
         import vid_score
         scores = vid_score.load_scores(a.scores)
     sheet = a.sheet or str(Path(a.video).with_suffix("")) + "_check.jpg"
-    rep = vid_qa.run_qa(a.video, a.edl, scores=scores, sheet=sheet)
+    notes = vl.load_json(a.notes) if a.notes else None
+    rep = vid_qa.run_qa(a.video, a.edl, scores=scores, sheet=sheet, notes=notes)
     out = a.json or str(Path(a.video).with_suffix("")) + ".qa.json"
     vid_qa.save_report(rep, out)
     print(vid_qa.format_report(rep))
@@ -473,6 +481,10 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("doctor", help="check FFmpeg, filters, encoders and optional features").set_defaults(fn=cmd_doctor)
     p = sub.add_parser("probe", help="inventory a footage folder (duration, rotation, fps, HDR, duplicates)")
     p.add_argument("folder"); p.add_argument("--work", required=True); p.add_argument("--recursive", action="store_true")
+    p.add_argument("--utc-offset", type=float, default=3.5,
+                   help="hours added to a camera's UTC creation time to get local time (Iran 3.5); phones that store local time ignore it")
+    p.add_argument("--clock-shift", action="append", metavar="DEVICE=MINUTES",
+                   help="minutes added to the times of a camera whose clock or time zone was wrong, e.g. DJI=30 (repeatable)")
     p.set_defaults(fn=cmd_probe)
     p = sub.add_parser("sheets", help="numbered contact sheets of the inventory (look at them to choose shots)")
     p.add_argument("--work", required=True); p.add_argument("--size", type=int, default=200)
@@ -507,6 +519,7 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("need", help="how many clips a beat grid needs")
     p.add_argument("beats"); p.add_argument("--duration", type=float); p.add_argument("--period", type=float)
     p.add_argument("--intro-shots", type=int, default=2)
+    p.add_argument("--body-start", type=float, help="seconds where the beat-by-beat body starts (default about 11 percent in); use the music's drop time to land the flash on the first body cut")
     p.add_argument("--pacing", choices=["beat", "energy"], help="energy = hold calm beats, cut fast on strong ones (Track B)")
     p.add_argument("--follow-tempo", action="store_true", help="place cuts on the variable-tempo grid (beats_refined), so late cuts do not drift (Track C)")
     p.set_defaults(fn=cmd_need)
@@ -517,6 +530,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--intro-shots", type=int, default=2); p.add_argument("--grade", default="warm-desert")
     p.add_argument("--no-transitions", action="store_true")
     p.add_argument("--bar-align", action="store_true", help="start the body on a downbeat (needs bar_phase in beats.json)")
+    p.add_argument("--body-start", type=float, help="seconds where the beat-by-beat body starts (default about 11 percent in); use the music's drop time to land the flash on the first body cut")
     p.add_argument("--pacing", choices=["beat", "energy"], help="energy = hold calm beats, cut fast on strong ones (Track B)")
     p.add_argument("--follow-tempo", action="store_true", help="place cuts on the variable-tempo grid (beats_refined), so late cuts do not drift (Track C)")
     p.add_argument("--scores", help="work folder containing scores.json: fill src_start from each clip's best window")
@@ -556,6 +570,7 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("qa", help="quality gate on a rendered video: defects, loudness, cut timing, effect audit")
     p.add_argument("video"); p.add_argument("--edl"); p.add_argument("--scores", help="work folder with scores.json (audits clip quality)")
     p.add_argument("--json", help="where to write the report (default: next to the video)"); p.add_argument("--sheet")
+    p.add_argument("--notes", help="shot-notes.json: the agent's shot sizes and movement override the measurements in the editorial checks")
     p.add_argument("--strict", action="store_true", help="exit 1 on warnings as well")
     p.set_defaults(fn=cmd_qa)
     p = sub.add_parser("color", help="colour correction and grading tools")

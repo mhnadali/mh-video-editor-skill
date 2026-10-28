@@ -81,8 +81,8 @@ class Classify(unittest.TestCase):
         self.assertEqual((d["type"], d["transition"]), ("soften", "dissolve"))
 
     def test_graphic_match_needs_a_different_scene_and_close_focus(self):
-        a = feat(focus=(0.5, 0.5), size="wide")
-        b = feat(focus=(0.52, 0.48), size="medium", hash=far_hash())
+        a = feat(focus=(0.3, 0.4), size="wide")
+        b = feat(focus=(0.32, 0.38), size="medium", hash=far_hash())
         self.assertEqual(self.go(a, b)["type"], "graphic-match")
         b2 = feat(focus=(0.9, 0.1), size="medium", hash=far_hash())
         self.assertNotEqual(self.go(a, b2)["type"], "graphic-match")
@@ -297,6 +297,43 @@ class Regressions(unittest.TestCase):
                                                 "--no-transitions", "--duration", "28.235", "--period", "0.6505"])
         with self.assertRaises(vl.EngineError):
             mh_video.cmd_plan(a)
+
+
+class RealFootageFindings(unittest.TestCase):
+    """Found when the engine met a real desert trip: centred points of interest and one dominant colour are not matches."""
+
+    def go(self, a, b):
+        return cl.classify(a, b, {"is_drop": False, "is_last": False, "section": None})
+
+    def test_two_centred_points_of_interest_are_not_a_graphic_match(self):
+        a = feat(focus=(0.5, 0.5), size="wide")
+        b = feat(focus=(0.52, 0.49), size="medium", hash=far_hash())
+        self.assertNotEqual(self.go(a, b)["type"], "graphic-match")
+        a2 = feat(focus=(0.25, 0.4), size="wide")
+        b2 = feat(focus=(0.27, 0.38), size="medium", hash=far_hash())
+        self.assertEqual(self.go(a2, b2)["type"], "graphic-match")
+
+    def test_colour_match_is_switched_off_when_every_shot_has_the_same_colour(self):
+        desert = [feat(hue=0.09 + 0.005 * i, colourfulness=0.4) for i in range(10)]
+        self.assertFalse(cl.colour_is_informative(desert))
+        mixed = [feat(hue=h, colourfulness=0.4) for h in (0.05, 0.3, 0.6, 0.85, 0.1, 0.55)]
+        self.assertTrue(cl.colour_is_informative(mixed))
+        self.assertTrue(cl.colour_is_informative([feat(hue=0.1)]))                 # too few shots to tell
+        a = feat(hue=0.60, colourfulness=0.4)
+        b = feat(hue=0.62, colourfulness=0.4, hash=far_hash())
+        off = cl.classify(a, b, {"colour_informative": False})
+        self.assertNotEqual(off["type"], "colour-match")
+
+    def test_a_drop_that_opens_the_body_gets_the_flash(self):
+        import vid_plan as vp
+        beats = {"duration": 45.0, "period": 0.612, "t0": 0.275, "drop_beat": 7, "file": None}
+        n = vp.layout_paced(beats, 45.0, 4.559, 0.612, 2)["shots"]
+        edl = vp.plan([{"clip": f"c{i}.mp4"} for i in range(n)], beats, duration=45.0, period=0.612, body_start=4.559,
+                      pacing="energy")
+        self.assertEqual(edl["beats"].get("drop_beat"), 0)
+        bounds = ve.timeline(edl)
+        self.assertIsNotNone(ve.drop_boundary(edl, bounds))
+        self.assertEqual(ve.effective_transitions(edl, bounds)[ve.drop_boundary(edl, bounds)], "fadewhite")
 
 
 class SmartPlan(unittest.TestCase):

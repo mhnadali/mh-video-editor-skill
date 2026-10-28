@@ -102,6 +102,45 @@ class QaWindows(unittest.TestCase):
         self.assertTrue(any(a <= t + 0.38 <= b and a <= t - 0.38 for a, b in wl["white"]))
 
 
+class QaEditorialIds(unittest.TestCase):
+    """Found on the first real run: editorial warnings had no `id`, so `qa` crashed when printing the report."""
+
+    def test_editorial_warnings_become_qa_checks_with_an_id(self):
+        import vid_qa
+        e = edl_of(6)
+        scores = {i: {"index": i, "path": f"c{i}.mp4", "shot_size": "wide", "motion_dx": 0.0, "motion_dy": 0.0,
+                      "motion_mag": 0.0, "hash": i, "quality": 80, "energy": 50, "best_start": 0.0, "flags": []} for i in range(6)}
+        checks, audit = vid_qa.audit_edit(e, scores)
+        self.assertTrue(any(c.get("id") == "shot-size-repeat" for c in checks), [c.get("id") for c in checks])
+        for c in checks:
+            self.assertIn("id", c, c)
+            self.assertIn("level", c)
+        counts = {k: sum(1 for c in checks if c["level"] == k) for k in ("error", "warn", "info", "ok")}
+        report = {"video": "x.mp4", "verdict": "warn", "checks": checks, "quality_score": 94, "duration": 6.0, "frames": 180,
+                  "size_mb": 1.0, "counts": counts}
+        self.assertIn("shot-size-repeat", vid_qa.format_report(report))
+
+
+class QaNotes(unittest.TestCase):
+    def test_notes_override_the_measured_shot_size_in_the_editorial_checks(self):
+        import vid_qa
+        e = edl_of(6)
+        scores = {i: {"index": i, "path": f"c{i}.mp4", "shot_size": "close", "motion_dx": 0.0, "motion_dy": 0.0,
+                      "motion_mag": 0.0, "hash": i * 977, "quality": 80, "energy": 50, "best_start": 0.0, "flags": []} for i in range(6)}
+        checks, _ = vid_qa.audit_edit(e, scores)
+        self.assertTrue(any(c["id"] == "shot-size-repeat" for c in checks))
+        notes = {f"c{i}.mp4": {"shot_size": ("wide", "medium", "detail")[i % 3]} for i in range(6)}
+        checks, audit = vid_qa.audit_edit(e, scores, notes)
+        self.assertFalse(any(c["id"] == "shot-size-repeat" for c in checks))
+        self.assertEqual(audit["distinct_shot_sizes"], 3)                      # detail counts as close
+
+    def test_override_score_turns_a_direction_into_motion(self):
+        s = cl.override_score({"shot_size": "wide", "motion_dx": 3.0}, {"motion_dir": "left"})
+        self.assertLess(s["motion_dx"], 0)
+        self.assertEqual(s["shot_size"], "wide")
+        self.assertEqual(cl.override_score(None, None), {})
+
+
 class FitFrames(unittest.TestCase):
     def test_closing_and_dissolves_breathe_but_short_shots_shrink_them(self):
         decisions = [{"j": 1, "type": "soften", "transition": "dissolve"}, {"j": 2, "type": "closing", "transition": "fade"}]

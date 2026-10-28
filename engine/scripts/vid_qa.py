@@ -366,7 +366,7 @@ def check_structure(info: dict, p: dict | None, size_bytes: int) -> list[dict]:
 
 # --------------------------------------------------------------------------- EDL audits
 
-def audit_edit(edl: dict, scores: dict | None = None) -> tuple[list[dict], dict]:
+def audit_edit(edl: dict, scores: dict | None = None, notes: dict | None = None) -> tuple[list[dict], dict]:
     """Effects, transitions, pacing and beat alignment of the plan itself (from the EDL, not the pixels)."""
     out: list[dict] = []
     p = ve.project(edl)
@@ -468,8 +468,13 @@ def audit_edit(edl: dict, scores: dict | None = None) -> tuple[list[dict], dict]
         for sh in edl["shots"]:
             key = os.path.normcase(os.path.abspath(sh["clip"]))
             feats.append(next((s for s in scores.values() if s.get("path") and os.path.normcase(os.path.abspath(s["path"])) == key), {}))
+        if notes:                                          # the agent's reading of the footage wins over the measurements
+            import vid_cutlogic
+            nt = vid_cutlogic.notes_by_path(notes)
+            feats = [vid_cutlogic.override_score(f, nt.get(os.path.normcase(os.path.abspath(sh["clip"])))) if f else f
+                     for f, sh in zip(feats, edl["shots"])]
         if any(f.get("shot_size") for f in feats):
-            out += vid_editorial.editorial_issues(edl, feats, bounds, trans)
+            out += [dict(i, id=i["code"]) for i in vid_editorial.editorial_issues(edl, feats, bounds, trans)]   # QA checks are keyed by `id`
             ed = vid_editorial.summarize_editorial(edl, feats, bounds, trans)
             audit.update(ed)
             out.append({"id": "editorial", "level": "info",
@@ -481,7 +486,7 @@ def audit_edit(edl: dict, scores: dict | None = None) -> tuple[list[dict], dict]
 # --------------------------------------------------------------------------- orchestration
 
 def run_qa(video: str | os.PathLike, edl_path: str | os.PathLike | None = None, scores: dict | None = None,
-           sheet: str | os.PathLike | None = None, log=None, fmt: str | None = None) -> dict:
+           sheet: str | os.PathLike | None = None, log=None, fmt: str | None = None, notes: dict | None = None) -> dict:
     edl = ve.load(edl_path) if edl_path else None
     info = vl.probe(video)
     if not info.get("has_video"):
@@ -510,7 +515,7 @@ def run_qa(video: str | os.PathLike, edl_path: str | os.PathLike | None = None, 
     checks += check_audio(aud, bool(p and p.get("music")), target, info["duration"])
     audit, audit_data = ({}, {})
     if edl:
-        audit_checks, audit_data = audit_edit(edl, scores)
+        audit_checks, audit_data = audit_edit(edl, scores, notes)
         checks += audit_checks
     worst = max((level_rank(c["level"]) for c in checks), default=0)
     verdict = {0: "pass", 1: "pass", 2: "warn", 3: "fail"}[worst]
