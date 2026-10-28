@@ -25,9 +25,14 @@ import vidlib as vl
 PLUGIN_DIR = Path(__file__).resolve().parent.parent.parent / "plugins" / "vision"
 VISION_FILE = "vision.json"
 MIN_FACE_AREA = 0.004          # a face this small (share of the frame) is a passer-by, not a subject
-SURE_FACE_FRAMES = 3           # a face in this many sampled frames: measured on 60 labelled clips of a real trip, a face in any
-                               # frame is right 40 % of the time, in 3 or more frames 60 % (clouds, mirrors and food counters
-                               # fool the classic detector); the notes of the agent are the only reliable source
+SURE_FACE_FRAMES = 3           # classic cascades: a face in this many sampled frames. Measured on 60 labelled clips of a real trip,
+                               # a face in any frame is right 40 % of the time, in 3 or more frames 60 % (clouds, mirrors and food
+                               # counters fool the cascades); the notes of the agent are the only reliable source
+# YuNet (the small face-detection network the plug-in uses when its model file is present), same 60 clips: a face in any frame is
+# right 83 % of the time and finds 71 % of the people; a face in 2+ frames that is not tiny is right 91 %+
+YUNET_SURE_FRAMES = 2
+YUNET_SURE_AREA = 0.005
+CERTAINTY = {"cascades": (0.25, 0.6), "yunet": (0.6, 0.9)}       # (a sighting, a sure sighting): how much of a person it counts for
 
 
 def plugin_python(plugin_dir: Optional[Path] = None) -> Optional[Path]:
@@ -103,12 +108,19 @@ def merge_into_scores(scores: dict, vision: dict) -> int:
         s["faces"] = v.get("faces")
         s["face_area"] = v.get("face_area")
         s["bodies"] = v.get("bodies")
+        detector = v.get("detector") or "cascades"
         if v.get("face_frames") is not None:                                     # the raw count: apply the current rule
             s["person"] = bool(v["face_frames"] >= 1 or (v.get("bodies") or 0) > 0)
-            s["person_sure"] = bool(v["face_frames"] >= SURE_FACE_FRAMES)
+            if detector == "yunet":
+                s["person_sure"] = bool(v["face_frames"] >= YUNET_SURE_FRAMES and (v.get("face_area") or 0.0) >= YUNET_SURE_AREA)
+            else:
+                s["person_sure"] = bool(v["face_frames"] >= SURE_FACE_FRAMES)
         else:
             s["person"] = bool(v.get("people"))
             s["person_sure"] = bool(v.get("people_sure"))
+        weak, sure = CERTAINTY.get(detector, CERTAINTY["cascades"])
+        s["person_certainty"] = (sure if s["person_sure"] else weak) if s["person"] else 0.0
+        s["person_detector"] = detector
         if v.get("scene_label"):
             s["scene_label"] = v["scene_label"]
         n += 1

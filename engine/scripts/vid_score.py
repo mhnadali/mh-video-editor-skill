@@ -23,7 +23,7 @@ import vidlib as vl
 WINDOW = 1.0
 POSITIONS = (0.25, 0.5, 0.75)
 ANALYSIS_WIDTH = 480
-SCHEMA = 4                  # bump when a measurement is added or fixed; `top_up` repairs older cached entries without a full decode
+SCHEMA = 5                  # bump when a measurement is added or fixed; `top_up` repairs older cached entries without a full decode
 DECODE_THREADS = 2          # many small decodes in parallel beat a few wide ones (measured: 15 % faster than the default)
 
 # One decode per window gives everything: exposure, motion and sharpness (metadata files) plus the tiny frames the
@@ -178,13 +178,37 @@ def window_hashes(path: str, start: float, hdr: bool = False) -> list | None:
     return hs if hs and all(h is not None for h in hs) else None
 
 
+def window_shot_size(path: str, start: float, hdr: bool = False) -> str | None:
+    """The shot size of one window, from the middle of six small gray frames (the same frames the full measurement uses)."""
+    vf = "fps=10," + f"scale={ANALYSIS_WIDTH}:-2," + (vid_sheets.TONEMAP_HLG if hdr else "") + \
+        "format=yuv420p,scale=48:27:flags=area,format=gray,fps=6"
+    r = subprocess.run([vl.find_ffmpeg()["ffmpeg"], "-v", "error", "-threads", str(DECODE_THREADS), "-ss", f"{max(0.0, start):.2f}",
+                        "-t", str(WINDOW), "-i", vl.ffp(path), "-an", "-vf", vf, "-frames:v", "6", "-f", "rawvideo", "-"],
+                       capture_output=True)
+    n = 48 * 27
+    frames = [r.stdout[i * n:(i + 1) * n] for i in range(len(r.stdout) // n)]
+    if r.returncode != 0 or not frames:
+        return None
+    return vid_editorial.shot_size(frames[len(frames) // 2])
+
+
 def top_up(old: dict, rec: dict) -> dict | None:
-    """Bring a cached entry of an older schema up to date with a small decode instead of measuring the clip again:
-    the three picture hashes (before schema 4 they were one frame repeated) and the clip's sound spikes. Returns the new
-    entry, or None if the entry is too old for that (the clip is measured again)."""
+    """Bring a cached entry of an older schema up to date with small decodes instead of measuring the clip again:
+    the three picture hashes and the clip's sound spikes (schema 4; before that the hashes were one frame repeated) and the
+    shot size (schema 5; the rule changed). Returns the new entry, or None if the entry is too old for that (the clip is
+    measured again)."""
     if "quality" not in old or "wins" not in old or "flux" not in old:
         return None
     out = dict(old)
+    start = old.get("best_start", 0.0)
+    if (old.get("v") or 0) < 5:
+        size = window_shot_size(rec["path"], start, bool(rec.get("hdr")))
+        if size is None:
+            return None
+        out["shot_size"] = size
+    if (old.get("v") or 0) >= 4:
+        out["v"] = SCHEMA
+        return out
     hs = window_hashes(rec["path"], old.get("best_start", 0.0), bool(rec.get("hdr")))
     if hs is None:
         return None

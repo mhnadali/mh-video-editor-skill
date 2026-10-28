@@ -76,6 +76,8 @@ are found automatically; your `people` notes always win.
 
 Two chosen shots that only look alike (a looser reading than the one that drops a clip) are flagged in the storyboard's warnings and on the review page, never dropped. People found only by the face detector count as part of a person (0.25, or 0.6 for a face in three frames) because it is right about half the time; your `people` notes count fully.
 
+`story audit` also reports `drop-weak` when the shot that starts on the music's drop is a calm picture. The measured shot size is only wide or medium (63 % agreement with shots labelled by eye); a close-up comes from a large certain face or from your notes, so write `shot_size` in `shot-notes.json` for the shots that matter.
+
 ### Reviewing and teaching
 `story review --work W --storyboard storyboard.json` writes one offline HTML page: a strip of three frames per chosen clip and per
 alternate, the reason for the choice, and the music's energy against the shots'. The user presses *Keep*, *Use this one* or *Ban*

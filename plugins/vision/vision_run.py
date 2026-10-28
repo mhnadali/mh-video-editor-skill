@@ -26,6 +26,9 @@ from pathlib import Path
 import cv2
 import numpy as np
 
+MODEL_DIR = Path(__file__).resolve().parent / "models"
+YUNET = MODEL_DIR / "face_detection_yunet_2023mar.onnx"      # fetched once by `setup.py --model`; used offline afterwards
+YUNET_SCORE = 0.7
 MIN_FACE_AREA = 0.004        # share of the frame: smaller faces are passers-by
 STRONG_FACE_AREA = 0.025     # a face this large in one frame is believed without a second sighting
 FRAME_WIDTH = 640
@@ -154,6 +157,25 @@ def majority_label(votes: list) -> str | None:
 _LOCAL = threading.local()
 
 
+def thread_yunet(model: str | None, score: float = YUNET_SCORE):
+    """One YuNet face detector per thread (they keep an input size), or None when no model file is available."""
+    if not model or not os.path.isfile(model) or not hasattr(cv2, "FaceDetectorYN"):
+        return None
+    d = getattr(_LOCAL, "yunet", None)
+    if d is None:
+        d = _LOCAL.yunet = cv2.FaceDetectorYN.create(model, "", (320, 320), score, 0.3, 50)
+    return d
+
+
+def detect_yunet(img, det) -> dict:
+    h, w = img.shape[:2]
+    det.setInputSize((w, h))
+    _ok, found = det.detect(img)
+    faces = [] if found is None else [tuple(int(v) for v in f[:4]) for f in found]
+    area = max((f[2] * f[3] for f in faces), default=0) / float(w * h)
+    return {"faces": len(faces), "face_area": round(area, 4), "bodies": 0}
+
+
 def thread_cascades() -> dict:
     """OpenCV cascade classifiers are not safe to share between threads (results change from run to run), so each worker
     thread loads its own."""
@@ -164,8 +186,10 @@ def thread_cascades() -> dict:
 
 
 def analyse_clip(rec: dict, score: dict | None, args, cascades: dict, net, labels: list) -> dict:
-    cascades = thread_cascades()
     per_frame, votes = [], []
+    yunet = thread_yunet(getattr(args, "face_model", None), getattr(args, "face_score", YUNET_SCORE))
+    if yunet is None:
+        cascades = thread_cascades()
     with tempfile.TemporaryDirectory(prefix="mhvid_vision_") as d:
         for k, t in enumerate(sample_times(rec, score, args.frames)):
             dest = os.path.join(d, f"{k}.jpg")
@@ -174,12 +198,13 @@ def analyse_clip(rec: dict, score: dict | None, args, cascades: dict, net, label
             img = cv2.imread(dest)
             if img is None:
                 continue
-            per_frame.append(detect(img, cascades))
+            per_frame.append(detect_yunet(img, yunet) if yunet is not None else detect(img, cascades))
             if net is not None:
                 label, p = classify(net, labels, img)
                 if p >= 0.3:
                     votes.append(label)
     res = aggregate(per_frame)
+    res["detector"] = "yunet" if yunet is not None else "cascades"
     lab = majority_label(votes)
     if lab:
         res["scene_label"] = lab
@@ -209,6 +234,9 @@ def main(argv=None) -> int:
     ap.add_argument("--onnx")
     ap.add_argument("--labels")
     ap.add_argument("--workers", type=int, default=max(2, (os.cpu_count() or 4) // 2))
+    ap.add_argument("--face-model", default=str(YUNET) if YUNET.is_file() else None,
+                    help="YuNet face detector (ONNX). Default: the one `setup.py --model` fetched, else the classic cascades")
+    ap.add_argument("--face-score", type=float, default=YUNET_SCORE, help="minimum YuNet confidence (0-1)")
     ap.add_argument("--force", action="store_true", help="look at every clip again, even if its earlier result is still valid")
     args = ap.parse_args(argv)
     work = Path(args.work)
@@ -219,8 +247,8 @@ def main(argv=None) -> int:
     only = parse_only(args.only)
     todo = [r for r in inv if r.get("dup_of") is None and not r.get("error")
             and (r.get("duration") or 0) >= args.min_duration - 0.1 and (only is None or r["index"] in only)]
-    cascades = load_cascades()
-    if not cascades:
+    cascades = load_cascades() if not args.face_model else {}
+    if not cascades and not args.face_model:
         print("no OpenCV cascades found in this environment", file=sys.stderr)
         return 3
     net, labels = None, []
@@ -246,7 +274,8 @@ def main(argv=None) -> int:
     def fresh(r):
         old = clips.get(str(r["index"]))
         return (old is not None and not args.force and old.get("size") == r.get("size") and old.get("mtime") == r.get("mtime")
-                and old.get("asked") == args.frames and old.get("engine") == cv2.__version__ and bool(args.onnx) == old.get("onnx", False))
+                and old.get("asked") == args.frames and old.get("engine") == cv2.__version__ and bool(args.onnx) == old.get("onnx", False)
+                and old.get("detector") == ("yunet" if args.face_model else "cascades"))
     work_list = [r for r in todo if not fresh(r)]
     with ThreadPoolExecutor(args.workers) as ex:
         for rec, res in zip(work_list, ex.map(lambda r: analyse_clip(r, scores.get(r["index"]), args, cascades, net, labels), work_list)):

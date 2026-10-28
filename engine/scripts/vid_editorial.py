@@ -247,27 +247,18 @@ def _grad(frame: bytes, w: int, h: int) -> list[int]:
     return g
 
 
+WIDE_TEXTURE = 25.0            # mean gradient of the 48x27 frame below which a shot reads as wide (sky, haze, far landscape)
+
+
 def shot_size(frame: bytes, w: int = GW, h: int = GH) -> str:
-    """Classify framing from where the detail sits: detail concentrated in the centre reads as a close-up, detail
-    spread evenly (or very little detail) reads as a wide shot."""
+    """Wide or medium from how much fine detail the picture has: a landscape of sky and distant sand has little, a nearer
+    subject (a car, a person, ground, food) has a lot. Measured against 174 shots labelled by eye on a real trip, this agrees
+    63 % of the time (the majority label alone: 42 %). The earlier rule (detail concentrated in the centre means close-up)
+    agreed 21 % of the time: on desert footage the centre of a landscape is as busy as its edges and a sand close-up is not.
+    A close-up cannot be told from the pixels with confidence; `close` comes from a large face (vid_story.clip_view) or
+    from the agent's notes."""
     g = _grad(frame, w, h)
-    area = w * h
-    full = sum(g) / area
-    cx0, cx1, cy0, cy1 = w // 3, 2 * w // 3, h // 3, 2 * h // 3
-    c = ca = 0
-    for y in range(cy0, cy1):
-        for x in range(cx0, cx1):
-            c += g[y * w + x]
-            ca += 1
-    center = c / max(ca, 1)
-    ratio = center / max(full, 1e-6)
-    if full < 4.0:
-        return "wide"
-    if ratio > 1.35:
-        return "close"
-    if ratio < 0.9:
-        return "wide"
-    return "medium"
+    return "wide" if sum(g) / (w * h) < WIDE_TEXTURE else "medium"
 
 
 def _sad(a: bytes, b: bytes, w: int, h: int, dx: int, dy: int) -> float:

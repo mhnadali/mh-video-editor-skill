@@ -2,6 +2,20 @@
 
 All notable changes to this project. Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [SemVer](https://semver.org/).
 
+## [0.18.0] - 2026-10-28 (phase B: content understanding, measured)
+Every change below was measured against clips labelled by eye on the first real trip; what failed the bar was left out (see `docs/CALIBRATION.md`).
+
+### Added
+- **YuNet face detector (optional, offline).** `python plugins/vision/setup.py --model` downloads the 232 KB MIT-licensed model once (SHA-256 checked) into `plugins/vision/models/` (git-ignored); `vision run` uses it automatically, else the cascades. On 60 labelled clips: `person` precision 0.83 / recall 0.71 (cascades: 0.34 / 0.79), `person_sure` (a face in 2+ frames, not tiny) precision 1.0 / recall 0.71. The engine reads the raw counts, so rules can change without running the plug-in again; each detector has its own certainty (YuNet 0.6 / 0.9, cascades 0.25 / 0.6).
+- **`story audit` `drop-weak`:** the shot that starts on the drop must be a strong picture (energy or role action).
+
+### Changed
+- **Shot size is measured differently.** The old rule (detail in the centre means a close-up) agreed with 174 hand-labelled shots only 21 % of the time (the most common label alone: 42 %); the new one (little fine detail means wide, otherwise medium) agrees 63 %. A close-up now comes from a large, certain face (or from the notes). `score` repairs existing entries with a small decode (`SCHEMA` 5).
+
+### Measured and not built
+- Suggesting `shot-notes.json` from the measurements: role 52 % and mood 49 % in cross-validation against 174 hand-written notes (guessing the most common label: 35 % / 48 %). The agent must look at the frames.
+- Speech / laughter detection: it cannot be checked without listening, so it is not shipped.
+
 ## [0.17.0] - 2026-10-28 (phase A: validation on real footage)
 First run of the 0.16 selection on a whole real library (Kavir trip: 486 clips, 3 cameras, 2 days). Measured against clips labelled by looking at them; the numbers are in `docs/CALIBRATION.md`.
 
