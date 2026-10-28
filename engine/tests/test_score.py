@@ -282,7 +282,7 @@ class Measured(unittest.TestCase):
         self.assertEqual(mh_video.main(["rank", "--work", str(work), "--only", "zero"]), 2)
         out = self.root / "picked.txt"
         self.assertEqual(mh_video.main(["pick", "--work", str(work), "--count", "6", "--out", str(out), "--allow-similar",
-                                        "--allow-flagged"]), 0)
+                                        "--allow-flagged", "--min-duration", "0", "--keep-repeats"]), 0)
         lines = [l for l in out.read_text(encoding="utf-8").splitlines() if l.strip()]
         self.assertEqual(len(lines), 6)
         self.assertTrue(all(" @ " in l for l in lines))

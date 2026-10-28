@@ -201,7 +201,7 @@ mh_video story exclusions [-h] --work WORK [--chapters CHAPTERS] [--notes NOTES]
 Choose the shots for the chapters and the music; writes storyboard.json/.md and a clip list.
 
 ```
-mh_video story select [-h] --work WORK --beats BEATS --chapters CHAPTERS [--notes NOTES] --duration DURATION [--body-start BODY_START] [--pacing {beat,energy}] [--intro-shots INTRO_SHOTS] [--period PERIOD] [--out OUT] [--clips CLIPS]
+mh_video story select [-h] --work WORK --beats BEATS --chapters CHAPTERS [--notes NOTES] --duration DURATION [--body-start BODY_START] [--pacing {beat,energy}] [--intro-shots INTRO_SHOTS] [--period PERIOD] [--out OUT] [--clips CLIPS] [--variant {balanced,action,people}] [--variants] [--method {beam,greedy}]
 ```
 
 | Argument | Required / default | Meaning |
@@ -217,6 +217,9 @@ mh_video story select [-h] --work WORK --beats BEATS --chapters CHAPTERS [--note
 | `--period PERIOD` |  | override the beat period in seconds |
 | `--out OUT` |  | output file |
 | `--clips CLIPS` |  | text file: one clip path per line, optional ` @ seconds` |
+| `--variant VARIANT` | default `balanced`; one of `balanced`, `action`, `people` | how the story is told: balanced, action first, or people first |
+| `--variants` |  | write all three variants and print a comparison table |
+| `--method METHOD` | one of `beam`, `greedy` | beam = optimise the whole sequence at once (default); greedy = chapter by chapter (the 0.15 behaviour) |
 
 ### `story audit`
 

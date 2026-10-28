@@ -356,9 +356,22 @@ def cmd_story(a) -> int:
     if a.action == "select":
         if not beats:
             raise vl.EngineError("story select needs --beats")
-        sb = vid_story.select(inv, scores, beats, cfg, notes, duration=a.duration, body_start=a.body_start, pacing=a.pacing,
-                              intro_shots=a.intro_shots, period=a.period)
+        kw = dict(duration=a.duration, body_start=a.body_start, pacing=a.pacing, intro_shots=a.intro_shots, period=a.period,
+                  method=a.method)
         out = Path(a.out or work / "storyboard.json")
+        if a.variants:
+            sbs = vid_story.select_variants(inv, scores, beats, cfg, notes, **kw)
+            for name, one in sbs.items():
+                vp = out.with_name(f"{out.stem}.{name}.json")
+                vl.save_json(vp, one)
+                vp.with_suffix(".md").write_text(vid_story.storyboard_markdown(one), encoding="utf-8")
+                vp.with_name(vp.stem + "-clips.txt").write_text(vid_story.clip_list_text(one), encoding="utf-8")
+            print(vid_story.format_comparison(vid_story.compare_variants(sbs)))
+            print(f"wrote {out.stem}.<variant>.json/.md and -clips.txt for {', '.join(sbs)}; show the user the comparison and the "
+                  "storyboard of the variant they prefer")
+            sb = sbs[a.variant]
+        else:
+            sb = vid_story.select(inv, scores, beats, cfg, notes, variant=a.variant, **kw)
         vl.save_json(out, sb)
         out.with_suffix(".md").write_text(vid_story.storyboard_markdown(sb), encoding="utf-8")
         clips = Path(a.clips) if a.clips else out.with_name(out.stem + "-clips.txt")
@@ -534,6 +547,9 @@ def cmd_verify(a) -> int:
 
 
 ARG_HELP = {
+    "variant": "how the story is told: balanced, action first, or people first",
+    "variants": "write all three variants and print a comparison table",
+    "method": "beam = optimise the whole sequence at once; greedy = chapter by chapter",
     "storyboard": "storyboard.json written by `story select`",
     "min_duration": "ignore clips shorter than this many seconds (default 5; 0 = all)",
     "keep_repeats": "keep every take of a moment (default: only the best take of each)",
@@ -671,6 +687,11 @@ def build_parser() -> argparse.ArgumentParser:
     q.add_argument("--duration", type=float, required=True); q.add_argument("--body-start", type=float)
     q.add_argument("--pacing", choices=["beat", "energy"], default="energy"); q.add_argument("--intro-shots", type=int, default=2)
     q.add_argument("--period", type=float); q.add_argument("--out"); q.add_argument("--clips")
+    q.add_argument("--variant", default="balanced", choices=["balanced", "action", "people"],
+                   help="how the story is told: balanced, action first, or people first")
+    q.add_argument("--variants", action="store_true", help="write all three variants and print a comparison table")
+    q.add_argument("--method", choices=["beam", "greedy"], default=None,
+                   help="beam = optimise the whole sequence at once (default); greedy = chapter by chapter (the 0.15 behaviour)")
     q = ssub.add_parser("audit", help="check an EDL against the story principles (chapters, cameras, people, energy vs music, order)")
     q.add_argument("edl"); q.add_argument("--work", required=True); q.add_argument("--beats"); q.add_argument("--notes")
     q.add_argument("--chapters"); q.add_argument("--free-order", action="store_true", help="do not require the trip order")
