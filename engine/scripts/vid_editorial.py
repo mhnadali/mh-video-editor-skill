@@ -205,6 +205,16 @@ def editorial_issues(edl: dict, feats: list[dict], bounds: list[int], trans: dic
         if abs(da) >= SCREEN_DIR_MIN and abs(db) >= SCREEN_DIR_MIN and (da > 0) != (db > 0):
             out.append(_issue("info", "screen-direction",
                               f"shot {j - 1}->{j}: camera motion reverses direction across the cut (check the 180-degree line)"))
+    # a directional slide/wipe should continue the content's movement, not fight it
+    import vid_cutlogic as _cl
+    for j, name in sorted(trans.items()):
+        want = _cl.TRANSITION_DIRECTION.get(name)
+        a = feats[j - 1] if 0 <= j - 1 < len(feats) else {}
+        if want in ("left", "right") and a and a.get("motion_dx") is not None and abs(a["motion_dx"]) >= SCREEN_DIR_MIN:
+            if (a["motion_dx"] < 0) != (want == "left"):
+                out.append(_issue("warn", "direction-mismatch",
+                                  f"cut {j}: '{name}' moves {want} but the outgoing shot's content moves "
+                                  f"{'left' if a['motion_dx'] < 0 else 'right'}; use the mirror transition or a hard cut"))
     # pacing: flat shot-length rhythm carries no emotion
     lens = [bounds[j + 1] - bounds[j] for j in range(n)]
     if n >= 5:

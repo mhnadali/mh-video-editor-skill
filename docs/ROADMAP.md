@@ -36,7 +36,7 @@ secondary colour correction; a single quality score in the QA gate.)
 Goal: every cut and transition has a type, a reason and a fit with the footage. The engine measures, the agent judges.
 
 - **0.9.0 - knowledge (done):** `references/cut-craft.md`, `transition-craft.md`, `footage-reading.md`, `shot-notes.json`, the cut-plan table and the "every cut has a reason" rule in the skill and the agent.
-- **0.10.0 - decision engine:** `vid_cutlogic.py` (pair features, an explainable classifier, `cuts` command with dry-run and `--write`), `plan --smart-transitions` within the existing budget, an EDL `rationale` field, lint/QA warnings (`transition-unmotivated`, `direction-mismatch`) and a `cut_report`.
+- **0.10.0 - decision engine (done):** `vid_cutlogic.py` (pair features, an explainable classifier, `cuts` command with dry-run and `--write`), `plan --smart-transitions` within the existing budget, an EDL `rationale` field, lint/QA warnings (`transition-unmotivated`, `direction-mismatch`) and a `cut_report`.
 - **0.11.0 - cut types in the renderer:** per-transition duration, J-cut / L-cut for clip ambient sound, motion alignment (match-on-action), direction-aware transitions.
 - **0.12.0 - measurement:** cheap content features (palette, subject vs camera motion, internal cuts), cut-quality metrics in `eval_quality.py`, a human checklist for real footage.
 

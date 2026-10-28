@@ -433,6 +433,12 @@ def audit_edit(edl: dict, scores: dict | None = None) -> tuple[list[dict], dict]
     if (edl.get("style") or {}).get("ambient"):
         parts.append("ambient sound")
     out.append({"id": "content", "level": "info", "msg": "; ".join(parts)})
+    if edl.get("rationale"):
+        import vid_cutlogic
+        cr = vid_cutlogic.cut_report(edl)
+        audit["cut_report"] = cr
+        out.append({"id": "cut-report", "level": "info",
+                    "msg": f"cut types {cr['cut_types']}; {cr['transitions_with_reason']}/{cr['transitions']} transitions have a reason"})
     if scores:
         used = []
         for sh in edl["shots"]:

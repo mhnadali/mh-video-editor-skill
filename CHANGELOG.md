@@ -2,6 +2,17 @@
 
 All notable changes to this project. Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [SemVer](https://semver.org/).
 
+## [0.10.0] - 2026-10-28 (cut and transition craft, phase 2: decision engine)
+### Added
+- **`vid_cutlogic.py`:** for every boundary between two shots it names the kind of cut and gives a one-sentence reason from the content: `impact` (the drop), `closing`, `cut-on-action`, `direction-clash`, `graphic-match`, `contrast-cut`, `size-step`, `soften`, `jump-risk`, `section-lift`, `motion-bridge`, `calm-dissolve`, `montage-cut`. Features come from the scores (shot size, camera motion, point of interest, brightness, energy, similarity) and the music sections; the agent's `shot-notes.json` overrides them. Directional slides/wipes follow the measured movement (sign convention pinned by a test).
+- **Transitions chosen under the budget:** highest-priority wishes win, at most the share cap, never two neighbours (except the drop and the ending), each name once, family cap, no banned names.
+- **`cuts EDL --scores DIR [--beats F] [--notes F] [--write] [--overwrite]`** (dry run by default) and **`plan --smart-transitions --scores DIR [--notes F]`**. The previous positional planner stays the default.
+- **EDL `rationale`** (validated by `lint`): `{cut: {type, why}}`; `lint` warns `transition-unmotivated` once rationale is in use and `flash-overuse` for more than one white flash; QA warns `direction-mismatch` and reports a `cut-report` (cut types, transitions with a reason).
+- 24 tests in `test_cutlogic.py` (classification, budget, notes override, lint/QA checks, planner-level run).
+
+### Changed
+- Opt-in only: without `rationale`, `cuts` or `--smart-transitions` nothing changes.
+
 ## [0.9.0] - 2026-10-28 (cut and transition craft, phase 1: knowledge)
 ### Added
 - **`references/cut-craft.md`:** the catalogue of cuts (hard cut on the beat, cut on action, graphic match, eyeline/direction match, smash cut, cutaway, cross-cut, montage, hold, J-cut, L-cut, jump cut) with when/why/avoid and the engine cue for each, the question to ask at every boundary, the 30- and 180-degree rules, reading time, and the short-form hook.

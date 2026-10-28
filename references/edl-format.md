@@ -46,6 +46,10 @@ Ordered, contiguous (each starts where the previous ended, to half a frame; the 
 ## transitions
 Keys are cut points: `"j"` is the cut between shot `j-1` and shot `j` (1 .. n-1). Missing = hard cut. Names: any xfade transition except the banned ones (see `references/effects-and-transitions.md`). With `drop_flash` on, the cut that carries the drop becomes `fadewhite` automatically.
 
+## rationale (optional, 0.10)
+Why each boundary is the kind of cut it is, written by `cuts --write` / `plan --smart-transitions` or by you:
+`"rationale": {"3": {"type": "motion-bridge", "why": "A ends moving left; a slide left carries it"}}`. Keys are cut numbers like `transitions`; `type` and a non-empty `why` are required. Types: `cut-on-action`, `graphic-match`, `contrast-cut`, `size-step`, `montage-cut`, `direction-clash`, `jump-risk` (hard cuts); `impact`, `closing`, `section-lift`, `motion-bridge`, `soften`, `calm-dissolve` (transitions). Once an EDL has a `rationale`, `lint` warns (`transition-unmotivated`) for every transition without one. See `references/cut-craft.md`.
+
 ## style
 | Key | Default | Meaning |
 |---|---|---|
