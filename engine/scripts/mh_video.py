@@ -270,12 +270,21 @@ def cmd_cuts(a) -> int:
     edl = vid_edl.load(a.edl)
     beats = vl.load_json(a.beats) if a.beats else None
     notes = vl.load_json(a.notes) if a.notes else None
-    decisions = vid_cutlogic.analyse(edl, vid_score.load_scores(a.scores), beats, notes)
+    scores = vid_score.load_scores(a.scores)
+    decisions = vid_cutlogic.analyse(edl, scores, beats, notes)
     print(vid_cutlogic.format_table(decisions, edl))
+    proposals = []
+    if a.align:
+        proposals = vid_cutlogic.align_edl(edl, scores, notes)
+        for p in proposals:
+            print(f"align shot {p['j']}: src_start {p['old']} -> {p['new']} (continues the {p['direction']} movement of shot {p['j'] - 1})")
+        if not proposals:
+            print("align: no shot needs a different start")
     if not a.write:
         print("dry run: nothing written. Review the reasons against the contact sheets; --write stores transitions + rationale.")
         return 0
     vid_cutlogic.apply(edl, decisions, overwrite=a.overwrite)
+    vid_cutlogic.apply_alignment(edl, proposals)
     vl.save_json(a.edl, edl)
     print(f"wrote {a.edl}: transitions and rationale ({'replaced' if a.overwrite else 'existing entries kept'})")
     return 0
@@ -517,7 +526,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("edl"); p.add_argument("--scores", required=True, help="work folder with scores.json")
     p.add_argument("--beats", help="beats.json (music sections mark where a transition is motivated)")
     p.add_argument("--notes", help="shot-notes.json (the agent's reading of the footage; wins over measurements)")
-    p.add_argument("--write", action="store_true", help="store transitions and rationale in the EDL")
+    p.add_argument("--align", action="store_true",
+                   help="also propose src_start values so a shot keeps moving the way the previous one ends (match on action; reads frames)")
+    p.add_argument("--write", action="store_true", help="store transitions and rationale (and alignments) in the EDL")
     p.add_argument("--overwrite", action="store_true", help="with --write: replace existing transitions and rationale")
     p.set_defaults(fn=cmd_cuts)
     p = sub.add_parser("lint", help="check an EDL: structure, restraint budget, files, FFmpeg capabilities")

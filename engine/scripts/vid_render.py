@@ -176,8 +176,9 @@ def part_plan(edl: dict, j: int, bounds: list[int], trans: dict[int, str], scale
     style = ve.merged_style(edl)
     fps = p["fps"]
     shot = edl["shots"][j]
-    head = ve.PAD if j in trans else 0
-    tail = ve.PAD if (j + 1) in trans else 0
+    ovs = ve.overlap_frames(edl, trans)
+    head = ovs[j] // 2 if j in trans else 0
+    tail = ovs[j + 1] // 2 if (j + 1) in trans else 0
     n = (bounds[j + 1] - bounds[j]) + head + tail
     W, H = output_size(edl, fmt, scale)
     split = None
@@ -471,6 +472,8 @@ def audio_plan(edl: dict, bounds: list[int], trans: dict[int, str], work: Path, 
             for sg in segs:
                 plan["inputs"] += ["-ss", f"{sg['start']:.3f}", "-t", f"{sg['seconds'] + 0.1:.3f}", "-i", sg["clip"]]
             plan["key"]["ambient"] = [(sg["j"], sg["start"], sg["seconds"], sg["gain_db"], sg["tempo"]) for sg in segs] + [amb["fade_ms"], amb["highpass_hz"]]
+            if any("lead" in sg for sg in segs):                      # only then: older projects keep their cache key
+                plan["key"]["ambient_jl"] = [(sg["j"], sg["delay"], sg["out_seconds"]) for sg in segs]
             log(f"ambient sound from {len(segs)} of {len(edl['shots'])} shots (music {music_mean if music_mean is not None else '?'} dB, "
                 f"bed {amb['level_db']} dB below)")
     return plan
@@ -542,12 +545,14 @@ def build_graph(edl: dict, parts: list[dict], bounds: list[int], trans: dict[int
     lens = [x["n"] for x in parts]
     lines = [f"[{j}:v]settb=AVTB,setpts=PTS-STARTPTS,fps={fps}[p{j}]" for j in range(N)]
     cur, curlen = "p0", lens[0]
+    ovs = ve.overlap_frames(edl, trans)
     for j in range(1, N):
         out = f"x{j}"
         if j in trans:
-            off = (curlen - OV) / fps
-            lines.append(f"[{cur}][p{j}]xfade=transition={trans[j]}:duration={OV / fps:.4f}:offset={off:.4f}[{out}]")
-            curlen += lens[j] - OV
+            ov = ovs[j]
+            off = (curlen - ov) / fps
+            lines.append(f"[{cur}][p{j}]xfade=transition={trans[j]}:duration={ov / fps:.4f}:offset={off:.4f}[{out}]")
+            curlen += lens[j] - ov
         else:
             lines.append(f"[{cur}][p{j}]concat=n=2:v=1:a=0,settb=AVTB,fps={fps}[{out}]")
             curlen += lens[j]

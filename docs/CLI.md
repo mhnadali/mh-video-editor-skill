@@ -184,7 +184,7 @@ mh_video plan [-h] --beats BEATS --clips CLIPS --out OUT [--name NAME] [--music 
 Name the kind of cut at every boundary and why; propose transitions (dry run unless --write).
 
 ```
-mh_video cuts [-h] --scores SCORES [--beats BEATS] [--notes NOTES] [--write] [--overwrite] edl
+mh_video cuts [-h] --scores SCORES [--beats BEATS] [--notes NOTES] [--align] [--write] [--overwrite] edl
 ```
 
 | Argument | Required / default | Meaning |
@@ -193,7 +193,8 @@ mh_video cuts [-h] --scores SCORES [--beats BEATS] [--notes NOTES] [--write] [--
 | `--scores SCORES` | required | work folder with scores.json |
 | `--beats BEATS` |  | beats.json (music sections mark where a transition is motivated) |
 | `--notes NOTES` |  | shot-notes.json (the agent's reading of the footage; wins over measurements) |
-| `--write` |  | store transitions and rationale in the EDL |
+| `--align` |  | also propose src_start values so a shot keeps moving the way the previous one ends (match on action; reads frames) |
+| `--write` |  | store transitions and rationale (and alignments) in the EDL |
 | `--overwrite` |  | with --write: replace existing transitions and rationale |
 
 ## `lint`

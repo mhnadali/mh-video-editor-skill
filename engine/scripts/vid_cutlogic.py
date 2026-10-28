@@ -42,6 +42,9 @@ PRIORITY = {"impact": 100, "closing": 90, "section-lift": 70, "motion-bridge": 6
 HARD_TYPES = {"cut-on-action", "graphic-match", "contrast-cut", "size-step", "montage-cut", "direction-clash",
               "jump-risk"}
 ALL_TYPES = set(PRIORITY) | HARD_TYPES
+# Overlap in frames (even; the cut stays centred on the beat). Calm passings of time breathe longer than energetic ones.
+DEFAULT_FRAMES = 2 * ve.PAD
+WANT_FRAMES = {"closing": 8, "soften": 8, "calm-dissolve": 8, "section-lift": 6}
 
 
 # --------------------------------------------------------------------------- features
@@ -261,6 +264,24 @@ def choose(decisions: list, n_cuts: int, bud: dict) -> list:
     return decisions
 
 
+def fit_frames(decisions: list, bounds: list) -> list:
+    """Give every chosen transition its overlap, shrinking it where a short shot could not hold its two overlaps."""
+    ov = {d["j"]: WANT_FRAMES.get(d["type"], DEFAULT_FRAMES) for d in decisions if d.get("transition")}
+    lens = [bounds[i + 1] - bounds[i] for i in range(len(bounds) - 1)]
+    changed = True
+    while changed:
+        changed = False
+        for k, ln in enumerate(lens):
+            if ov.get(k, 0) // 2 + ov.get(k + 1, 0) // 2 > ln - 2:
+                shrinkable = [j for j in (k, k + 1) if ov.get(j, 0) > ve.MIN_OVERLAP]
+                if shrinkable:
+                    ov[max(shrinkable, key=lambda j: ov[j])] -= 2
+                    changed = True
+    for d in decisions:
+        d["frames"] = ov.get(d["j"])
+    return decisions
+
+
 # --------------------------------------------------------------------------- whole-EDL analysis
 
 def section_context(beats: Optional[dict], t: float, period: float) -> Optional[str]:
@@ -278,17 +299,21 @@ def section_context(beats: Optional[dict], t: float, period: float) -> Optional[
     return None
 
 
-def analyse(edl: dict, scores: dict, beats: Optional[dict] = None, notes: Optional[dict] = None) -> list:
-    """Decisions for boundaries 1..n-1 of `edl`: a list of {j, type, why, confidence, transition}."""
-    shots = edl["shots"]
-    n = len(shots)
-    bounds = ve.timeline(edl)
-    fps = ve.project(edl)["fps"]
+def edl_features(edl: dict, scores: dict, notes: Optional[dict] = None) -> list:
     sc, nt = scores_by_path(scores), notes_by_path(notes)
     feats = []
-    for sh in shots:
+    for sh in edl["shots"]:
         key = os.path.normcase(os.path.abspath(sh["clip"]))
         feats.append(shot_features(sc.get(key), nt.get(key)))
+    return feats
+
+
+def analyse(edl: dict, scores: dict, beats: Optional[dict] = None, notes: Optional[dict] = None) -> list:
+    """Decisions for boundaries 1..n-1 of `edl`: a list of {j, type, why, confidence, transition}."""
+    n = len(edl["shots"])
+    bounds = ve.timeline(edl)
+    fps = ve.project(edl)["fps"]
+    feats = edl_features(edl, scores, notes)
     drop_j = ve.drop_boundary(edl, bounds) if ve.merged_style(edl)["drop_flash"] else None
     period = float((edl.get("beats") or {}).get("period") or (beats or {}).get("period") or 0.5)
     out = []
@@ -298,15 +323,16 @@ def analyse(edl: dict, scores: dict, beats: Optional[dict] = None, notes: Option
         d = classify(feats[j - 1], feats[j], ctx)
         d["j"] = j
         out.append(d)
-    return choose(out, n - 1, ve.budget(edl))
+    return fit_frames(choose(out, n - 1, ve.budget(edl)), bounds)
 
 
 def apply(edl: dict, decisions: list, overwrite: bool = False) -> dict:
     """Write transitions and rationale for the decisions into `edl` (existing entries kept unless `overwrite`)."""
     trans = dict(edl.get("transitions") or {})
     rat = dict(edl.get("rationale") or {})
+    tf = dict(edl.get("transition_frames") or {})
     if overwrite:
-        trans, rat = {}, {}
+        trans, rat, tf = {}, {}, {}
     for d in decisions:
         k = str(d["j"])
         if k not in rat:
@@ -316,15 +342,95 @@ def apply(edl: dict, decisions: list, overwrite: bool = False) -> dict:
             rat[k] = entry
         if d.get("transition") and k not in trans:
             trans[k] = d["transition"]
+            if d.get("frames") and d["frames"] != DEFAULT_FRAMES:
+                tf[k] = d["frames"]
     edl["transitions"] = dict(sorted(trans.items(), key=lambda kv: int(kv[0])))
     edl["rationale"] = dict(sorted(rat.items(), key=lambda kv: int(kv[0])))
+    if tf:
+        edl["transition_frames"] = dict(sorted(tf.items(), key=lambda kv: int(kv[0])))
+    else:
+        edl.pop("transition_frames", None)
+    return edl
+
+
+# --------------------------------------------------------------------------- motion alignment (match on action)
+
+def measure_windows(clip: str, duration: float, need: float, step: float = 0.75, max_windows: int = 8) -> list:
+    """[(start, dx, dy, mag)] camera motion of up to `max_windows` windows of `need` seconds across the clip."""
+    import vid_editorial
+    info = vl.probe(clip)
+    hdr = bool(info.get("hdr"))
+    out = []
+    t = 0.0
+    while t + need <= duration + 1e-6 and len(out) < max_windows:
+        frames = vid_editorial.gray_frames(clip, t, min(max(need, 0.3), 2.0), hdr=hdr)
+        if frames:
+            dx, dy, mag = vid_editorial.motion_vector(frames)
+            out.append((round(t, 3), dx, dy, mag))
+        t += step
+    return out
+
+
+def continues(direction: str, dx: float, dy: float) -> bool:
+    if direction == "left":
+        return dx <= -LATERAL_MIN
+    if direction == "right":
+        return dx >= LATERAL_MIN
+    if direction == "up":
+        return dy <= -LATERAL_MIN
+    if direction == "down":
+        return dy >= LATERAL_MIN
+    return False
+
+
+def align_start(candidates: list, direction: str, current: float) -> Optional[float]:
+    """The start of the window whose movement continues `direction`, nearest to `current`; None if no window does."""
+    ok = [c for c in candidates if continues(direction, c[1], c[2])]
+    if not ok:
+        return None
+    return min(ok, key=lambda c: abs(c[0] - current))[0]
+
+
+def align_edl(edl: dict, scores: dict, notes: Optional[dict] = None, measure=measure_windows) -> list:
+    """Proposals [{j, direction, old, new}] that set `src_start` so shot j keeps moving the way shot j-1 ends.
+
+    Only where shot j-1 clearly moves one way and shot j does not already continue it. `measure(clip, duration, need)`
+    is injectable for tests."""
+    feats = edl_features(edl, scores, notes)
+    bounds = ve.timeline(edl)
+    fps = ve.project(edl)["fps"]
+    out = []
+    for j in range(1, len(edl["shots"])):
+        a, b = feats[j - 1], feats[j]
+        d = direction_name(a) if moving(a) else None
+        if not d or (moving(b) and direction_name(b) == d):
+            continue
+        shot = edl["shots"][j]
+        need = (bounds[j + 1] - bounds[j]) / fps
+        try:
+            dur = float(vl.probe(shot["clip"])["duration"])
+        except (vl.EngineError, KeyError, TypeError):
+            continue
+        cur = shot.get("src_start")
+        cur = 0.4 * dur if cur is None else float(cur)
+        new = align_start(measure(shot["clip"], dur, need), d, cur)
+        if new is not None and abs(new - cur) > 0.05:
+            out.append({"j": j, "direction": d, "old": round(cur, 3), "new": new})
+    return out
+
+
+def apply_alignment(edl: dict, proposals: list) -> dict:
+    for p in proposals:
+        edl["shots"][p["j"]]["src_start"] = p["new"]
     return edl
 
 
 def format_table(decisions: list, edl: dict) -> str:
-    lines = [f"{'cut':>3}  {'type':14} {'transition':11} {'conf':>4}  why"]
+    lines = [f"{'cut':>3}  {'type':14} {'transition':14} {'conf':>4}  why"]
     for d in decisions:
-        lines.append(f"{d['j']:>3}  {d['type']:14} {(d.get('transition') or '-'):11} {d['confidence']:>4.1f}  {d['why']}")
+        tr = d.get("transition")
+        label = "-" if not tr else (tr if d.get("frames") in (None, DEFAULT_FRAMES) else f"{tr} {d['frames']}f")
+        lines.append(f"{d['j']:>3}  {d['type']:14} {label:14} {d['confidence']:>4.1f}  {d['why']}")
     types: dict = {}
     for d in decisions:
         types[d["type"]] = types.get(d["type"], 0) + 1

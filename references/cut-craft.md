@@ -24,8 +24,8 @@ The engine measures (shot size, camera motion direction and size, the point of i
 | **Cross-cut / parallel** | Alternating two lines of action | Two places or subjects that build to one point | Short videos with no second line of action | `shot-notes` subjects |
 | **Montage cut** | A run of short shots joined by theme, not continuity | Energy, "the trip in 20 seconds"; every cut on the beat | No unifying theme (it feels random) | `pacing`, `energy` |
 | **Breathing / hold cut** | A longer shot after fast ones | Let the picture land after a build, before the payoff, at the ending | Everywhere (the video drags) | calm beats (`--pacing energy`) |
-| **J-cut** | The sound of B starts before its picture | Smooth, natural entry into a new place; the ear leads the eye | There is no usable sound of the clips (music-only edit) | `shot.audio` ambient (engine support: see roadmap) |
-| **L-cut** | The sound of A continues over the picture of B | Keep the mood while the picture changes | Same as J-cut | `shot.audio` ambient |
+| **J-cut** | The sound of B starts before its picture | Smooth, natural entry into a new place; the ear leads the eye | There is no usable sound of the clips (music-only edit) | `shot.audio.lead` (0.11) |
+| **L-cut** | The sound of A continues over the picture of B | Keep the mood while the picture changes | Same as J-cut | `shot.audio.lag` (0.11) |
 | **Jump cut** | Two similar shots of the same subject and size | Almost never; sometimes deliberate for comedy or rhythm | Always avoid by changing size or angle by about 30 degrees or more, or insert a cutaway | `jump-cut` warning |
 
 ## Rules that carry most of the quality
@@ -41,6 +41,10 @@ The engine measures (shot size, camera motion direction and size, the point of i
 
 ## Movement and the direction of cuts
 Direction is continuity, not symbolism: reading direction and culture change what left and right "mean", so do not lean on it. If the content of A travels toward one side of the frame, start B travelling the same way, or break it on purpose (a clash) and say that is intended in the cut's `why`.
+
+## Engine support for the sound cuts and for match on action
+- **J-cut / L-cut:** `shots[i].audio = {"lead": 0.4}` lets that shot's own sound enter 0.4 s before its picture; `{"lag": 0.3}` lets it linger. Needs `style.ambient` and clips with audible sound (wind, engine, voices). See `references/edl-format.md`.
+- **Match on action:** `cuts EDL --scores DIR --align` proposes a `src_start` for a shot whose clip has a window moving the way the previous shot ends; `--write` stores it. It reads frames, so confirm the result on the contact sheet.
 
 ## What the engine cannot see (you must)
 Faces and expressions, the meaning of a moment, whether a gesture is complete, culture and taste. Read the footage (`footage-reading.md`), write what you see into `shot-notes.json`, and let those notes override a heuristic.
