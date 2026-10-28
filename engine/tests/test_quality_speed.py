@@ -111,8 +111,8 @@ class SinglePassScore(unittest.TestCase):
         root.mkdir(exist_ok=True)
         clip = helpers.make_clip(root / "a.mp4", "testsrc2", size="320x568", seconds=4.0)
         m = vs.measure_window(vl.ffp(clip), 1.0, 1.0)
-        self.assertEqual({k: len(v) for k, v in m["tiny"].items()}, {"gray": 6, "rgb": 3, "hash": 1})
-        self.assertEqual(len(m["tiny"]["hash"][0]), 72)
+        self.assertEqual({k: len(v) for k, v in m["tiny"].items()}, {"gray": 6, "rgb": 3, "hash": 3, "jit": 10})
+        self.assertEqual(len(m["tiny"]["hash"][1]), 72)
         rec = {"index": 0, "path": vl.ffp(clip), "name": "a.mp4", "duration": 4.0, "size": 1, "mtime": 1, "error": None}
         out = vs.score_clip(rec)
         for k in ("quality", "best_start", "hash", "shot_size", "motion_dx", "focus_x", "hue", "flux", "local_motion"):
@@ -126,7 +126,7 @@ class SinglePassScore(unittest.TestCase):
         clip = helpers.make_clip(root / "b.mp4", "smptebars", size="320x568", seconds=4.0)
         fast = vs.measure_window(vl.ffp(clip), 1.0, 1.0)["tiny"]
         slow_hash = vs.dhash(vl.ffp(clip), 1.5)
-        self.assertLessEqual(bin(vs.hash_from_pixels(fast["hash"][0]) ^ slow_hash).count("1"), 8)       # the 'same scene' threshold
+        self.assertLessEqual(bin(vs.hash_from_pixels(fast["hash"][1]) ^ slow_hash).count("1"), 8)       # the 'same scene' threshold
         slow = ed.measure_shot(vl.ffp(clip), 1.0, 1.0)
         quick = ed.measure_from_frames(fast["gray"], fast["rgb"])
         self.assertEqual(slow["shot_size"], quick["shot_size"])

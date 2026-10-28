@@ -107,6 +107,92 @@ def flux(frames: list[bytes]) -> float:
     return round(worst, 2)
 
 
+def jitter(frames: list[bytes], w: int = GW, h: int = GH, rng: int = 2) -> float:
+    """Camera shake: how much the global shift between consecutive frames wobbles around its own average, in analysis
+    pixels (48 wide) per frame step. A steady pan or a drive has a constant shift and scores about 0; a hand-held walk or a
+    bumpy ride scores high. A textureless window (nothing to track) reads 0."""
+    if len(frames) < 3 or any(len(f) != w * h for f in frames) or _texture(frames[0], w, h) < 2.0:
+        return 0.0
+    dxs, dys = [], []
+    for a, b in zip(frames, frames[1:]):
+        dx, dy = motion_between(a, b, w, h, rng=rng)
+        dxs.append(dx)
+        dys.append(dy)
+    mx, my = sum(dxs) / len(dxs), sum(dys) / len(dys)
+    return round(sum(abs(x - mx) + abs(y - my) for x, y in zip(dxs, dys)) / len(dxs), 3)
+
+
+def texture_mean(frames: list[bytes], w: int = GW, h: int = GH) -> float:
+    """Average gradient strength of the frames (0 = flat). A covered lens or a wall reads near 0."""
+    vals = [_texture(f, w, h) for f in frames if len(f) == w * h]
+    return round(sum(vals) / len(vals), 3) if vals else 0.0
+
+
+def colour_signature(rgb: list[bytes], w: int = 16, h: int = 9) -> list[int]:
+    """Mean RGB of the four quarters of the picture, averaged over the frames: 12 numbers that say where the colours are."""
+    cells = [[0, 0, 0, 0] for _ in range(4)]
+    for fr in rgb:
+        if len(fr) != w * h * 3:
+            continue
+        for y in range(h):
+            for x in range(w):
+                q = (0 if y < h // 2 else 2) + (0 if x < w // 2 else 1)
+                i = (y * w + x) * 3
+                c = cells[q]
+                c[0] += fr[i]
+                c[1] += fr[i + 1]
+                c[2] += fr[i + 2]
+                c[3] += 1
+    out: list[int] = []
+    for c in cells:
+        n = max(c[3], 1)
+        out += [int(c[0] / n), int(c[1] / n), int(c[2] / n)]
+    return out
+
+
+def colour_distance(a: list[int], b: list[int]) -> float:
+    """Mean absolute difference of two colour signatures (0-255)."""
+    if not a or not b or len(a) != len(b):
+        return 255.0
+    return sum(abs(x - y) for x, y in zip(a, b)) / len(a)
+
+
+def scene_shares(rgb: list[bytes], w: int = 16, h: int = 9) -> dict:
+    """Rough content of the picture without any model: the share of sky, sand, vegetation and dark pixels."""
+    sky = sand = green = dark = total = 0
+    for fr in rgb:
+        if len(fr) != w * h * 3:
+            continue
+        for y in range(h):
+            for x in range(w):
+                i = (y * w + x) * 3
+                r, g, b = fr[i], fr[i + 1], fr[i + 2]
+                total += 1
+                lum = (r + g + b) / 3.0
+                if lum < 45:
+                    dark += 1
+                elif b > r + 15 and b >= g and lum > 110 and y < h * 0.7:
+                    sky += 1
+                elif r > g > b and r - b > 25 and 110 < r < 235:
+                    sand += 1
+                elif g > r + 10 and g > b + 10:
+                    green += 1
+    t = max(total, 1)
+    return {"sky": round(sky / t, 2), "sand": round(sand / t, 2), "green": round(green / t, 2), "dark": round(dark / t, 2)}
+
+
+def scene_label(shares: dict) -> str:
+    if shares.get("dark", 0) > 0.6:
+        return "dark"
+    if shares.get("sky", 0) > 0.40:
+        return "sky"
+    if shares.get("sand", 0) > 0.35:
+        return "desert"
+    if shares.get("green", 0) > 0.30:
+        return "green"
+    return "other"
+
+
 def internal_cut(frames: list[bytes]) -> bool:
     """True if one step between consecutive analysis frames is far larger than the others: the clip itself cuts or
     flashes there. A fast pan changes every step by a similar amount, so it does not trigger this."""
@@ -283,6 +369,9 @@ def measure_from_frames(frames: list[bytes], rgb: list[bytes] | None = None) -> 
     if rgb:
         hue, sat = dominant_hue(rgb)
         out["hue"], out["colourfulness"] = hue, sat
+        out["csig"] = colour_signature(rgb)
+        shares = scene_shares(rgb)
+        out["scene_shares"], out["scene"] = shares, scene_label(shares)
     return out
 
 

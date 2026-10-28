@@ -23,13 +23,33 @@ import os
 from typing import Optional
 
 import vid_cutlogic as cl
+import vid_filter as vf
 import vid_plan as vp
+import vid_profile as vprof
 import vidlib as vl
 
 MOODS = {"calm": 0.25, "building": 0.55, "intense": 0.85}
 CHAPTER_ENERGY = {"calm": 0.2, "building": 0.5, "peak": 0.85, "intense": 0.85}
 SAME_SCENE_BITS = 10
 DEVICE_SHORT = 12
+
+# How much each consideration counts. A variant (or a `weights` object in chapters.json) changes some of them.
+WEIGHTS = {"quality": 0.30, "fit": 0.28, "sound": 0.08, "spread": 0.10, "people": 0.20, "camera": 0.12, "role": 0.15,
+           "scene": 0.6, "topic": 0.5, "size": 0.12, "topic_run": 0.25, "flow": 1.0, "clash": 0.15, "colour": 0.08,
+           "transition": 1.0, "must": 2.0, "event": 0.05}
+
+VARIANTS = {
+    "balanced": {"weights": {}, "role_pref": {}, "min_people_share": None},
+    "action": {"weights": {"fit": 0.34, "people": 0.10, "role": 0.20}, "role_pref": {"action": 0.14}, "min_people_share": 0.15},
+    "people": {"weights": {"people": 0.34, "fit": 0.22}, "role_pref": {"portrait": 0.10}, "min_people_share": 0.55},
+}
+
+
+def weights_for(cfg: dict, variant: str = "balanced") -> dict:
+    w = dict(WEIGHTS)
+    w.update({k: float(v) for k, v in (cfg.get("weights") or {}).items() if k in WEIGHTS})
+    w.update(VARIANTS.get(variant, {}).get("weights", {}))
+    return w
 
 
 # --------------------------------------------------------------------------- chapters
@@ -94,6 +114,29 @@ def validate_chapters(cfg: dict) -> dict:
             raise vl.EngineError(f"chapter '{c['name']}': order must be chronological or energy")
     if cfg.get("hook", "chronological") not in ("chronological", "teaser"):
         raise vl.EngineError("hook must be 'chronological' or 'teaser'")
+    for key, known in (("filters", vf.DEFAULT_FILTERS), ("dedupe", vf.DEFAULT_DEDUPE)):
+        given = cfg.get(key)
+        if given is None:
+            continue
+        if not isinstance(given, dict):
+            raise vl.EngineError(f"'{key}' must be an object")
+        for k in given:
+            if k not in known:
+                raise vl.EngineError(f"{key}: unknown setting '{k}' (known: {', '.join(known)})")
+    wts = cfg.get("weights")
+    if wts is not None:
+        if not isinstance(wts, dict):
+            raise vl.EngineError("'weights' must be an object")
+        for k, v in wts.items():
+            if k not in WEIGHTS:
+                raise vl.EngineError(f"weights: unknown weight '{k}' (known: {', '.join(WEIGHTS)})")
+            if not isinstance(v, (int, float)) or isinstance(v, bool):
+                raise vl.EngineError(f"weights.{k} must be a number")
+    if cfg.get("method", "beam") not in ("beam", "greedy"):
+        raise vl.EngineError("method must be 'beam' or 'greedy'")
+    md = (cfg.get("filters") or {}).get("min_duration")
+    if md is not None and (not isinstance(md, (int, float)) or isinstance(md, bool) or md < 0):
+        raise vl.EngineError("filters.min_duration must be a number of seconds >= 0")
     return cfg
 
 
@@ -193,6 +236,17 @@ def _note(notes: dict, rec: dict) -> dict:
     return notes.get(os.path.normcase(os.path.abspath(rec["path"]))) or {}
 
 
+def _people(note: dict, score: dict) -> bool:
+    """Is a person in the clip? The agent's note decides when it says so (`people` true or false, or role portrait); else the
+    local vision plug-in's judgement (faces or bodies seen); else no."""
+    if "people" in note:
+        return bool(note["people"]) or note.get("role") == "portrait"
+    if note.get("role") == "portrait":
+        return True
+    seen = score.get("person")
+    return bool(seen) if seen is not None else False
+
+
 def clip_view(rec: dict, score: dict, note: dict) -> dict:
     """The few numbers the selection reasons about, merged from the measurement and the agent's notes."""
     mood = note.get("mood")
@@ -201,19 +255,32 @@ def clip_view(rec: dict, score: dict, note: dict) -> dict:
     size = "close" if size == "detail" else size
     wins = score.get("wins") or []
     action_start = max(wins, key=lambda w: w[2])[0] if wins else score.get("best_start", 0.0)
+    role = note.get("role") or ("portrait" if (score.get("face_area") or 0.0) >= 0.04 and (score.get("faces") or 0) >= 1 else None)
     return {"index": rec["index"], "path": rec["path"], "name": rec.get("name"), "taken": rec.get("taken"),
             "epoch": rec.get("taken_epoch") or 0.0, "device": device_key(rec), "duration": rec.get("duration") or 0.0,
             "quality": (score.get("quality") or 0.0) / 100.0, "act": act,
             "sound": None if score.get("sound") is None else score["sound"] / 100.0,
-            "hash": score.get("hash"), "size": size, "role": note.get("role"), "topic": note.get("topic"),
-            "people": bool(note.get("people")) or note.get("role") == "portrait",
+            "transient": None if score.get("transient") is None else score["transient"] / 100.0,
+            "hash": score.get("hash"), "size": size, "role": role, "topic": note.get("topic"),
+            "people": _people(note, score),
             "best_start": score.get("best_start", 0.0), "action_start": action_start,
+            "brightness": score.get("brightness"), "csig": score.get("csig") or [], "scene": score.get("scene"),
+            "motion_dx": score.get("motion_dx"), "motion_mag": score.get("motion_mag"),
+            "faces": score.get("faces"), "bias": score.get("_bias", 0.0),
             "flags": score.get("flags") or [], "internal_cut": bool(score.get("internal_cut"))}
 
 
-def pool(chapter: dict, inventory: list, scores: dict, notes: dict, avoid: set, allow_flagged: bool = False) -> list:
+SOFT_REASONS = {"dark", "blurry", "shaky", "covered", "internal-cut", "low-quality"}
+
+
+def pool(chapter: dict, inventory: list, scores: dict, notes: dict, avoid: set, excluded: Optional[dict] = None,
+         relaxed: bool = False) -> list:
+    """The clips a chapter may use. `excluded` ({index: [reasons]}, from `vid_filter.exclusions`) removes unusable clips and
+    the weaker takes of a moment; `relaxed` still allows the soft reasons (dark, blurry, shaky ...) when a chapter has too
+    few clips, but never a short clip, a copy, a weaker take of the same moment or a clip marked `skip`."""
     out = []
     must = set(chapter.get("must") or [])
+    excluded = excluded or {}
     for rec in inventory:
         i = rec["index"]
         if not (chapter["from"] <= i <= chapter["to"]) or rec.get("dup_of") is not None or i in avoid:
@@ -222,11 +289,18 @@ def pool(chapter: dict, inventory: list, scores: dict, notes: dict, avoid: set, 
         if not sc or "quality" not in sc:
             continue
         note = _note(notes, rec)
-        if note.get("skip") or i in set(chapter.get("avoid") or []):
+        if i in set(chapter.get("avoid") or []):
+            continue
+        why = excluded.get(i, [])
+        if "banned" in why:
+            continue                      # the user's own decision, even over `must`
+        if why and i not in must:
+            hard = [w for w in why if w.split(":")[0] not in SOFT_REASONS]
+            if hard or not relaxed:
+                continue
+        elif i in must and note.get("skip"):
             continue
         v = clip_view(rec, sc, note)
-        if i not in must and not allow_flagged and (("blurry" in v["flags"]) or ("dark" in v["flags"]) or v["internal_cut"]):
-            continue
         v["must"] = i in must
         out.append(v)
     return out
@@ -242,30 +316,38 @@ def _components(c: dict, target: float, chosen: list, ctx: dict) -> dict:
     """Score parts of one candidate against what is already chosen (all 0..1 unless a penalty)."""
     parts = {"quality": c["quality"], "fit": 1.0 - abs(c["act"] - target)}
     parts["sound"] = c["sound"] if c["sound"] is not None else 0.0
+    w = ctx.get("w") or WEIGHTS
     bonus, why = 0.0, []
     if c["people"] and ctx["people_share"] < ctx["min_people_share"]:
-        bonus += 0.20
+        bonus += w["people"]
         why.append("brings people into the story")
     if len(ctx["device_library_share"]) > 1 and ctx["picked_so_far"] >= 4 and             ctx["device_share"].get(c["device"], 0.0) < ctx["device_library_share"].get(c["device"], 0.0) * 0.8:
-        bonus += 0.12
+        bonus += w["camera"]
         why.append(f"{c['device']} is under-used")
     if ctx["roles"] and c["role"] in ctx["roles"]:
-        bonus += 0.15
+        bonus += w["role"]
         why.append(f"the wanted role ({c['role']})")
+    pref = (ctx.get("role_pref") or {}).get(c["role"])
+    if pref:
+        bonus += pref
+        why.append(f"favoured in this variant ({c['role']})")
+    if c.get("bias"):
+        bonus += c["bias"]
+        why.append("matches your remembered taste" if c["bias"] > 0 else "against your remembered taste")
     parts["bonus"] = bonus
     parts["bonus_why"] = why
     pen = 0.0
     for o in chosen:
         h = _hamming(c["hash"], o["hash"])
         if h is not None and h <= SAME_SCENE_BITS:
-            pen += 0.6
+            pen += w["scene"]
         if c["topic"] and c["topic"] == o["topic"] and ctx["topic_count"].get(c["topic"], 0) >= ctx["max_per_topic"] \
                 and o in ctx.get("chapter_picks", []):
-            pen += 0.5                       # `topic_count` is reset for every chapter: a trip about dunes may show dunes twice
+            pen += w["topic"]                # `topic_count` is reset for every chapter: a trip about dunes may show dunes twice
     if chosen and c["size"]:
         same = sum(1 for o in chosen if o["size"] == c["size"])
         if same / len(chosen) > 0.45 and len(chosen) >= 3:
-            pen += 0.12
+            pen += w["size"]
     parts["penalty"] = pen
     if chosen:
         span = max(abs(c["epoch"] - o["epoch"]) for o in chosen)
@@ -276,9 +358,10 @@ def _components(c: dict, target: float, chosen: list, ctx: dict) -> dict:
     return parts
 
 
-def total(parts: dict) -> float:
-    return (0.30 * parts["quality"] + 0.28 * parts["fit"] + 0.08 * parts["sound"] + parts["bonus"]
-            + 0.10 * parts["spread"] - parts["penalty"])
+def total(parts: dict, w: Optional[dict] = None) -> float:
+    w = w or WEIGHTS
+    return (w["quality"] * parts["quality"] + w["fit"] * parts["fit"] + w["sound"] * parts["sound"] + parts["bonus"]
+            + w["spread"] * parts["spread"] - parts["penalty"])
 
 
 def pick_chapter(cands: list, n: int, target: float, ctx: dict, chosen_global: list) -> tuple:
@@ -297,7 +380,7 @@ def pick_chapter(cands: list, n: int, target: float, ctx: dict, chosen_global: l
         already = chosen_global + [p[0] for p in picked]
         for c in remaining:
             parts = _components(c, target, already, local_ctx)
-            t = total(parts)
+            t = total(parts, local_ctx.get("w"))
             if t > best_total:
                 best, best_parts, best_total = c, parts, t
         picked.append((best, best_parts))
@@ -306,7 +389,7 @@ def pick_chapter(cands: list, n: int, target: float, ctx: dict, chosen_global: l
         if best["topic"]:
             ctx["topic_count"][best["topic"]] = ctx["topic_count"].get(best["topic"], 0) + 1
     # alternates: the best unchosen clips of the chapter, scored on their own
-    alt = sorted(remaining, key=lambda c: -total(_components(c, target, [], local_ctx)))
+    alt = sorted(remaining, key=lambda c: -total(_components(c, target, [], local_ctx), local_ctx.get("w")))
     return picked, [c["index"] for c in alt[:6]]
 
 
@@ -323,7 +406,7 @@ def pick_by_slot(cands: list, slots: list, chapter: dict, ctx: dict, chosen_glob
             break
         target = 0.5 * slots[k]["music"] + 0.5 * base
         already = chosen_global + [o[0] for o in out if o]
-        scored = [(total(_components(c, target, already, ctx)), c) for c in remaining]
+        scored = [(total(_components(c, target, already, ctx), ctx.get("w")), c) for c in remaining]
         scored.sort(key=lambda x: -x[0])
         best = scored[0][1]
         out[k] = (best, _components(best, target, already, ctx))
@@ -331,16 +414,46 @@ def pick_by_slot(cands: list, slots: list, chapter: dict, ctx: dict, chosen_glob
         if best["topic"]:
             ctx["topic_count"][best["topic"]] = ctx["topic_count"].get(best["topic"], 0) + 1
         remaining.remove(best)
-    alt = sorted(remaining, key=lambda c: -total(_components(c, base, [], ctx)))
+    alt = sorted(remaining, key=lambda c: -total(_components(c, base, [], ctx), ctx.get("w")))
     return out, [c["index"] for c in alt[:6]]
 
 
 def select(inventory: list, scores: dict, beats: dict, cfg: dict, notes: Optional[dict] = None, duration: float = 45.0,
            body_start: Optional[float] = None, pacing: Optional[str] = "energy", intro_shots: int = 2,
-           period: Optional[float] = None) -> dict:
+           period: Optional[float] = None, variant: str = "balanced", method: Optional[str] = None,
+           profile: Optional[dict] = None) -> dict:
     cfg = validate_chapters(cfg)
+    if profile:
+        # the user's remembered taste: weights, a bias per topic / role / favoured clip, banned clips, pinned clips
+        cfg = dict(cfg, weights={**(cfg.get("weights") or {}), **profile.get("weights", {})})
+        pins = vprof.pinned(profile, inventory)
+        cfg["chapters"] = [dict(c, must=sorted(set(c.get("must") or []) | {i for i in pins if c["from"] <= i <= c["to"]}))
+                           for c in cfg["chapters"]]
+        nt0 = cl.notes_by_path(notes)
+        scores = dict(scores)
+        for rec in inventory:
+            s = scores.get(rec["index"])
+            if s and "quality" in s:
+                scores[rec["index"]] = dict(s, _bias=vprof.clip_bias(profile, clip_view(rec, s, _note(nt0, rec))))
+        banned = vprof.banned_indexes(profile, inventory)
+    else:
+        banned = set()
+    if variant not in VARIANTS:
+        raise vl.EngineError(f"unknown variant '{variant}' (known: {', '.join(VARIANTS)})")
+    method = method or cfg.get("method", "beam")
+    if method not in ("beam", "greedy"):
+        raise vl.EngineError("method must be 'beam' or 'greedy'")
+    w = weights_for(cfg, variant)
+    role_pref = dict(VARIANTS[variant]["role_pref"])
+    min_people = VARIANTS[variant]["min_people_share"]
+    min_people = float(cfg.get("min_people_share", 0.0)) if min_people is None else float(min_people)
     nt = cl.notes_by_path(notes)
     chapters = cfg["chapters"]
+    must_all = {i for c in chapters for i in (c.get("must") or [])}
+    ex = vf.exclusions(inventory, scores, notes, cfg.get("filters"), cfg.get("dedupe"), must=must_all)
+    excluded = {k: list(v) for k, v in ex["reasons"].items()}
+    for i in banned:
+        excluded.setdefault(i, []).append("banned")
     slots = make_slots(beats, duration, body_start, pacing, intro_shots, period)
     teaser = cfg.get("hook") == "teaser"
     counts = allocate(chapters, slots, reserve=1 if teaser else 0, flex=cfg.get("flex", 0.3))
@@ -349,7 +462,7 @@ def select(inventory: list, scores: dict, beats: dict, cfg: dict, notes: Optiona
         if r.get("dup_of") is None and not r.get("error"):
             lib_dev[device_key(r)] = lib_dev.get(device_key(r), 0) + 1
     lib_total = sum(lib_dev.values()) or 1
-    ctx = {"people_share": 0.0, "min_people_share": float(cfg.get("min_people_share", 0.0)),
+    ctx = {"people_share": 0.0, "min_people_share": min_people, "w": w, "role_pref": role_pref,
            "device_share": {}, "device_library_share": {d: n / lib_total for d, n in lib_dev.items()},
            "topic_count": {}, "max_per_topic": int(cfg.get("max_per_topic", 3)), "roles": set(), "chapter_span": 1.0,
            "picked_so_far": 0}
@@ -361,7 +474,7 @@ def select(inventory: list, scores: dict, beats: dict, cfg: dict, notes: Optiona
     teaser_entry = None
     if teaser:
         tc = next((c for c in chapters if c["name"] == cfg.get("teaser_chapter")), None) or max(chapters, key=chapter_energy)
-        cands = pool(tc, inventory, scores, nt, set())
+        cands = pool(tc, inventory, scores, nt, set(), excluded)
         if not cands:
             raise vl.EngineError("no clip available for the teaser")
         ctx["roles"] = {"action"}
@@ -370,16 +483,41 @@ def select(inventory: list, scores: dict, beats: dict, cfg: dict, notes: Optiona
         teaser_entry = (f"{tc['name']} (teaser)", picked[0][0], picked[0][1], _alt, 0.9)
         chosen_global.append(picked[0][0])
     used = {teaser_entry[1]["index"]} if teaser_entry else set()
-    for c, cnt in zip(chapters, counts):
+    sequence_value = None
+    if method == "beam":
+        plan, shortlist = plan_slots(chapters, counts, slots, cursor, inventory, scores, nt, excluded, cfg, w, role_pref, used, warnings)
+        picks, sequence_value, alts = beam_entries(plan, w, cfg, ctx, chosen_global, role_pref)
+        if plan and not picks:
+            # a long chronological chapter can strand the beam when each slot only offers its favourites: offer every clip
+            plan, shortlist = plan_slots(chapters, counts, slots, cursor, inventory, scores, nt, excluded, cfg, w, role_pref, used,
+                                         [], limit=10 ** 6)
+            picks, sequence_value, alts = beam_entries(plan, w, cfg, ctx, chosen_global, role_pref)
+        if plan and not picks:
+            warnings.append("no complete sequence could be built (the chronological order and the pools do not fit); "
+                            "relax the chapters or the filters")
+        for k, v in enumerate(picks):
+            slot = plan[k]
+            ch = slot["chapter"]
+            ex_ctx = dict(ctx, roles=set(ch.get("roles") or []), topic_count={}, picked_so_far=k + len(chosen_global),
+                          max_per_topic=int(ch.get("max_per_topic", cfg.get("max_per_topic", 3))), chapter_span=1.0,
+                          people_share=sum(1 for p_ in picks[:k] if p_["people"]) / max(k, 1),
+                          device_share={d: sum(1 for p_ in picks[:k] if p_["device"] == d) / max(k, 1) for d in {p_["device"] for p_ in picks[:k]}})
+            parts = _components(v, slot["target"], picks[:k] + chosen_global, ex_ctx)
+            entries.append((ch["name"], v, parts, alts[k], slot["target"]))
+        counts_for_loop = []
+    else:
+        counts_for_loop = list(zip(chapters, counts))
+    for c, cnt in counts_for_loop:
         if cnt <= 0:
             continue
         sl = slots[cursor:cursor + cnt]
         target = sum(s["music"] for s in sl) / len(sl) if sl else chapter_energy(c)
         target = 0.5 * target + 0.5 * chapter_energy(c)      # the music asks, the chapter's nature answers
-        cands = pool(c, inventory, scores, nt, used)
+        cands = pool(c, inventory, scores, nt, used, excluded)
         if len(cands) < cnt:
-            warnings.append(f"chapter '{c['name']}' has {len(cands)} usable clips for {cnt} slots; flagged clips were allowed")
-            cands = pool(c, inventory, scores, nt, used, allow_flagged=True)
+            warnings.append(f"chapter '{c['name']}' has {len(cands)} usable clips for {cnt} slots; clips with soft problems "
+                            "(dark, blurry, shaky ...) were allowed")
+            cands = pool(c, inventory, scores, nt, used, excluded, relaxed=True)
         if len(cands) < cnt:
             warnings.append(f"chapter '{c['name']}' only has {len(cands)} clips for {cnt} slots: the chapter is given fewer shots")
             cnt = len(cands)
@@ -422,13 +560,207 @@ def select(inventory: list, scores: dict, beats: dict, cfg: dict, notes: Optiona
                      "name": v["name"], "taken": v["taken"], "device": v["device"], "role": v["role"], "size": v["size"],
                      "people": v["people"], "topic": v["topic"], "energy": round(v["act"], 2), "target": round(target, 2),
                      "start": round(start, 2), "start_kind": "action moment" if action else "best frame window",
-                     "score": round(total(parts), 3), "path": v["path"],
+                     "score": round(total(parts, w), 3), "path": v["path"],
                      "why": explain(v, parts, target, s), "alternates": [a for a in alt if a != v["index"]][:2]})
     if len(rows) < len(slots):
         warnings.append(f"only {len(rows)} of {len(slots)} slots could be filled")
     return {"duration": duration, "slots": len(slots), "body_start": body_start, "pacing": pacing,
+            "variant": variant, "method": method,
+            "sequence_score": None if sequence_value is None else round(sequence_value, 3),
             "hook": cfg.get("hook", "chronological"), "chapters": chapter_summary(chapters, counts, rows),
-            "rows": rows, "warnings": warnings, "coverage": coverage(rows, inventory), "shortlist": shortlist}
+            "rows": rows, "warnings": warnings, "coverage": coverage(rows, inventory), "shortlist": shortlist,
+            "exclusions": vf.summarize(ex, sum(1 for r in inventory if r.get("dup_of") is None)),
+            "same_moment": [{"keep": c["keep"], "drop": c["drop"]} for c in ex["clusters"]]}
+
+
+
+# --------------------------------------------------------------------------- the sequence as a whole (beam search)
+
+BEAM_WIDTH = 60
+CANDIDATES_PER_SLOT = 12
+
+
+def transition_value(hist: list, cur: dict, w: dict) -> tuple:
+    """How well `cur` follows the shots before it (hist = the last shots, newest last): variety of size, topic, device,
+    the flow of light and colour, and the direction of movement. Returns (value, [reasons]); a penalty is negative."""
+    if not hist:
+        return 0.0, []
+    prev = hist[-1]
+    v, why = 0.0, []
+    if prev["size"] and prev["size"] == cur["size"]:
+        v -= w["size"]
+        if len(hist) >= 2 and hist[-2]["size"] == prev["size"]:
+            v -= 1.5 * w["size"]
+            why.append("a third shot of the same size")
+    if cur["topic"] and cur["topic"] == prev["topic"]:
+        v -= w["topic_run"]
+        why.append(f"{cur['topic']} twice in a row")
+    if prev["brightness"] is not None and cur["brightness"] is not None and abs(prev["brightness"] - cur["brightness"]) > 80:
+        v -= 0.1 * w["flow"]
+        why.append("a big jump of light")
+    pd, cd = cl.lateral({"dx": prev["motion_dx"]}), cl.lateral({"dx": cur["motion_dx"]})
+    if pd and cd and pd != cd and (prev["motion_mag"] or 0) >= cl.MOVE_MIN and (cur["motion_mag"] or 0) >= cl.MOVE_MIN:
+        v -= w["clash"]
+        why.append("the movement reverses direction")
+    if prev["csig"] and cur["csig"]:
+        dist = sum(abs(a - b) for a, b in zip(prev["csig"], cur["csig"])) / len(cur["csig"])
+        v -= w["colour"] * min(1.0, max(0.0, (dist - 50.0) / 100.0))
+    if len(hist) >= 2 and hist[-2]["device"] == prev["device"] == cur["device"]:
+        v -= 0.04
+    return v * w["transition"], why
+
+
+def unary_value(c: dict, target: float, chapter: dict, w: dict, role_pref: dict) -> float:
+    v = w["quality"] * c["quality"] + w["fit"] * (1.0 - abs(c["act"] - target)) + (w["sound"] * c["sound"] if c["sound"] is not None else 0.0)
+    if c.get("transient") is not None and target >= 0.5:
+        v += w["event"] * c["transient"]                  # a spike of sound (cheering, an engine) belongs under a strong moment
+    if chapter.get("roles") and c["role"] in chapter["roles"]:
+        v += w["role"]
+    v += role_pref.get(c["role"], 0.0)
+    v += c.get("bias", 0.0)
+    if c.get("must"):
+        v += w["must"]
+    return v
+
+
+def beam_entries(plan: list, w: dict, cfg: dict, ctx: dict, prior: list, role_pref: dict, width: int = BEAM_WIDTH) -> tuple:
+    """Choose one clip per slot for the WHOLE edit at once.
+
+    `plan` is a list of slots: {"slot", "chapter" (dict), "target", "cands" (clip views), "order" (chronological | energy),
+    "unary": {index: value}}. A state is the clips chosen so far; its value is the sum of the unary values of the choices,
+    the transition values between neighbours, and the global terms (the same scene twice, a topic repeated in a chapter, the
+    share of people and of each camera). The best `width` states are kept at every slot. Returns (picks, value, alternates)."""
+    n = len(plan)
+    min_people = float(ctx.get("min_people_share") or 0.0)
+    lib_share = ctx.get("device_library_share") or {}
+    states = [{"picks": [], "value": 0.0, "people": 0, "dev": {}, "topics": {}, "used": frozenset(prior_i["index"] for prior_i in prior)}]
+    for k, slot in enumerate(plan):
+        chapter = slot["chapter"]
+        order_chrono = slot["order"] == "chronological"
+        cap = int(chapter.get("max_per_topic", cfg.get("max_per_topic", 3)))
+        cands = slot["cands"]
+        nxt: dict = {}
+        for st in states:
+            hist = st["picks"][-2:]
+            prev = st["picks"][-1] if st["picks"] else None
+            for c in cands:
+                if c["index"] in st["used"]:
+                    continue
+                if order_chrono and prev is not None and plan[k - 1]["chapter"]["name"] == chapter["name"] and \
+                        plan[k - 1]["order"] == "chronological" and c["epoch"] < prev["epoch"]:
+                    continue                                   # inside a chronological chapter the trip's order is kept
+                if order_chrono and slot["later"].get(c["index"], 0) < slot["remaining"]:
+                    continue                                   # too late in the chapter: the slots after it could not be filled
+                val = slot["unary"][c["index"]]
+                tv, _why = transition_value(hist, c, w)
+                val += tv
+                for o in st["picks"]:                          # the same picture twice
+                    h = _hamming(c["hash"], o["hash"])
+                    if h is not None and h <= SAME_SCENE_BITS:
+                        val -= w["scene"]
+                        break
+                if c["topic"]:
+                    seen = st["topics"].get((chapter["name"], c["topic"]), 0)
+                    if seen >= cap:
+                        val -= w["topic"]
+                done = len(st["picks"]) + 1
+                if c["people"] and min_people and st["people"] / max(done, 1) < min_people:
+                    val += w["people"]
+                lib = lib_share.get(c["device"], 0.0)
+                if len(lib_share) > 1 and done >= 4 and st["dev"].get(c["device"], 0) / done < 0.8 * lib:
+                    val += w["camera"]
+                key = (c["index"], prev["index"] if prev else None)
+                ns = {"picks": st["picks"] + [c], "value": st["value"] + val,
+                      "people": st["people"] + (1 if c["people"] else 0),
+                      "dev": dict(st["dev"], **{c["device"]: st["dev"].get(c["device"], 0) + 1}),
+                      "topics": dict(st["topics"]), "used": st["used"] | {c["index"]}}
+                if c["topic"]:
+                    ns["topics"][(chapter["name"], c["topic"])] = ns["topics"].get((chapter["name"], c["topic"]), 0) + 1
+                if key not in nxt or ns["value"] > nxt[key]["value"]:
+                    nxt[key] = ns
+        if not nxt:
+            return [], 0.0, []
+        states = sorted(nxt.values(), key=lambda s_: (-s_["value"], [p["index"] for p in s_["picks"]]))[:width]
+    best = states[0]
+    picked = best["picks"]
+    chosen = {p["index"] for p in picked}
+    alts = []
+    for k, slot in enumerate(plan):
+        rest = sorted((c for c in slot["cands"] if c["index"] not in chosen), key=lambda c: -slot["unary"][c["index"]])
+        alts.append([c["index"] for c in rest[:6]])
+    return picked, best["value"], alts
+
+
+def plan_slots(chapters: list, counts: list, slots: list, cursor: int, inventory: list, scores: dict, nt: dict, excluded: dict,
+               cfg: dict, w: dict, role_pref: dict, taken: set, warnings: list, limit: int = CANDIDATES_PER_SLOT) -> tuple:
+    """The per-slot candidate lists for the beam: every chapter's clips scored for each of its slots (the best
+    `CANDIDATES_PER_SLOT`, plus any clip the user insisted on)."""
+    plan: list = []
+    shortlist: dict = {}
+    for c, cnt in zip(chapters, counts):
+        if cnt <= 0:
+            continue
+        sl = slots[cursor:cursor + cnt]
+        cands = pool(c, inventory, scores, nt, taken, excluded)
+        if len(cands) < cnt:
+            warnings.append(f"chapter '{c['name']}' has {len(cands)} usable clips for {cnt} slots; clips with soft problems "
+                            "(dark, blurry, shaky ...) were allowed")
+            cands = pool(c, inventory, scores, nt, taken, excluded, relaxed=True)
+        if len(cands) < cnt:
+            warnings.append(f"chapter '{c['name']}' only has {len(cands)} clips for {cnt} slots: the chapter is given fewer shots")
+            sl = sl[:len(cands)]
+        base = chapter_energy(c)
+        by_time = sorted(cands, key=lambda v: (v["epoch"], v["index"]))
+        later = {v["index"]: len(by_time) - 1 - k for k, v in enumerate(by_time)}       # clips of the chapter that come after this one
+        for n_slot, slot in enumerate(sl):
+            target = 0.5 * slot["music"] + 0.5 * base
+            unary = {v["index"]: unary_value(v, target, c, w, role_pref) for v in cands}
+            top = sorted(cands, key=lambda v: (-unary[v["index"]], v["index"]))[:limit]
+            # the best clip of every stretch of the chapter's time as well: a chronological chapter needs choices all along it
+            size = max(1, len(by_time) // max(len(sl), 1))
+            for g in range(0, len(by_time), size):
+                best = max(by_time[g:g + size], key=lambda v: (unary[v["index"]], -v["index"]))
+                if best not in top:
+                    top.append(best)
+            for v in cands:
+                if v.get("must") and v not in top:
+                    top.append(v)
+            plan.append({"slot": slot, "chapter": c, "target": target, "cands": top, "order": c.get("order", "chronological"),
+                         "unary": unary, "later": later, "remaining": len(sl) - 1 - n_slot})
+        shortlist[c["name"]] = sorted({v["index"] for p in plan if p["chapter"] is c for v in p["cands"]})
+        cursor += counts[chapters.index(c)]
+    return plan, shortlist
+
+
+def select_variants(inventory: list, scores: dict, beats: dict, cfg: dict, notes: Optional[dict] = None,
+                    names: tuple = ("balanced", "action", "people"), **kw) -> dict:
+    """The same story told three ways (balanced, action-first, people-first): a dict of storyboards by variant name."""
+    return {n: select(inventory, scores, beats, cfg, notes, variant=n, **kw) for n in names}
+
+
+def compare_variants(sbs: dict) -> list:
+    """One row of numbers per variant, to choose between them: sequence value, people, action, topics, cameras and how
+    well the energy of the pictures follows the music."""
+    out = []
+    for name, sb in sbs.items():
+        rows = sb["rows"]
+        n = max(len(rows), 1)
+        corr = _pearson([r["music"] for r in rows], [r["energy"] for r in rows])
+        out.append({"variant": name, "sequence_score": sb.get("sequence_score"), "shots": len(rows),
+                    "people_share": round(sum(1 for r in rows if r["people"]) / n, 2),
+                    "action_shots": sum(1 for r in rows if r["role"] == "action"),
+                    "distinct_topics": len({r["topic"] for r in rows if r["topic"]}),
+                    "energy_correlation": None if corr is None else round(corr, 2),
+                    "devices": sb["coverage"]["devices_in_edit"]})
+    return out
+
+
+def format_comparison(table: list) -> str:
+    lines = [f"{'variant':9} {'value':>8} {'people':>7} {'action':>7} {'topics':>7} {'energy~music':>12}  cameras"]
+    for r in table:
+        lines.append(f"{r['variant']:9} {str(r['sequence_score']):>8} {r['people_share']:>7.0%} {r['action_shots']:>7} "
+                     f"{r['distinct_topics']:>7} {str(r['energy_correlation']):>12}  {r['devices']}")
+    return chr(10).join(lines)
 
 
 def n_total(counts: list, teaser: bool) -> int:
@@ -495,6 +827,12 @@ def storyboard_markdown(sb: dict) -> str:
     cv = sb["coverage"]
     out += ["", "## Coverage", f"- cameras in the edit: {cv['devices_in_edit']} (library: {cv['devices_in_library']})",
             f"- shots with people: {cv['people_share']:.0%}", f"- roles: {cv['roles']}"]
+    ex = sb.get("exclusions")
+    if ex:
+        out += ["", "## Left out before choosing",
+                f"- {ex['usable']} of {ex['clips']} clips were usable; excluded: " +
+                ", ".join(f"{k} {v}" for k, v in ex["by_reason"].items()),
+                f"- {ex['same_moment_clusters']} moments were filmed more than once: only the best take of each is used"]
     if sb["warnings"]:
         out += ["", "## Warnings"] + [f"- {w}" for w in sb["warnings"]]
     return "\n".join(out) + "\n"
@@ -507,6 +845,10 @@ def format_storyboard(sb: dict) -> str:
                      f"{r['taken'][5:16]:11} {r['device'][:9]:9} {(r['role'] or '-')[:12]:12} {r['why']}")
     cv = sb["coverage"]
     lines.append(f"cameras {cv['devices_in_edit']} vs library {cv['devices_in_library']}; people {cv['people_share']:.0%}; roles {cv['roles']}")
+    ex = sb.get("exclusions")
+    if ex:
+        lines.append(f"left out: {ex['excluded']} of {ex['clips']} clips ({', '.join(f'{k} {v}' for k, v in ex['by_reason'].items())}); "
+                     f"{ex['same_moment_clusters']} repeated moments reduced to their best take")
     lines += [f"WARNING: {w}" for w in sb["warnings"]]
     return "\n".join(lines)
 

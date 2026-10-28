@@ -56,6 +56,39 @@ are missing. This is the method that replaces it. The engine ranks and checks; y
    | `energy-mismatch` / `energy-curve` | loud music under a calm shot; the pictures do not follow the music |
    | `short-reading-time` | a wide, establishing or portrait shot is on screen less than 0.9 s |
 
+## Selection depth (0.16): who gets in, and who stays out
+Before any clip competes for a slot it must be usable. `story exclusions --work W [--chapters chapters.json]` prints why each
+clip is left out and writes `exclusions.json/.csv`.
+
+| Reason | Rule |
+|---|---|
+| `short` | shorter than 5 s (`filters.min_duration`); never used, not even as `must` |
+| `dark` / `blurry` / `shaky` / `covered` / `internal-cut` / `low-quality` | measured defects; a chapter short of clips may relax these, never the next two |
+| `same-moment:N` | the weaker take of a moment filmed twice (same camera within 150 s, or two cameras within 90 s, with the same picture, colours and light): only the best take is kept, chosen by quality, steadiness, sharpness, exposure and length |
+| `banned` | the user banned it in the review page |
+
+`story select` then optimises the **whole sequence at once** (a beam search): every shot is scored alone, and every neighbour pair
+is scored too (the same shot size twice, a jump of light, a reversing direction, a colour clash, the same topic); the three
+variants (`--variants`: balanced, action, people) tell the same story three ways. `--method greedy` keeps the older chapter-by-chapter
+choice. `story refine` moves each start time to the best moment inside the clip (sharp, steady, the action peak, away from the
+end of the clip). With the optional offline plug-in (`python plugins/vision/setup.py`, then `vision run --work W`) people and faces
+are found automatically; your `people` notes always win.
+
+### Reviewing and teaching
+`story review --work W --storyboard storyboard.json` writes one offline HTML page: a strip of three frames per chosen clip and per
+alternate, the reason for the choice, and the music's energy against the shots'. The user presses *Keep*, *Use this one* or *Ban*
+and exports `decisions.json`; `story feedback --work W --storyboard storyboard.json --feedback decisions.json` applies it (the
+storyboard changes) and remembers the taste in `profile.json`: topics and roles gain or lose a small, capped bias, replaced clips
+become favoured, banned clips are never used, kept clips are pinned. The next `story select` uses it automatically (`--profile`
+to point elsewhere, `--no-profile` to ignore it; a global profile at `~/.mh-video-skill/profile.json` or `MH_PROFILE` applies to
+every project, the project's own file wins). `story profile --work W` shows what is remembered. Nothing is learned without an
+explicit decision, and the file is plain JSON the user may edit.
+
+### Measuring the selection
+`python engine/tools/eval_selection.py --check` builds a synthetic library with a known truth (short clips, same-moment copies on
+one and two cameras, people clips) and reports: short clips used (must be 0), both takes of a moment used (0), best take kept,
+order errors (0), slots filled, chapters covered, distinct pictures, energy fit with the music, people share. The tests run it.
+
 ## Principles behind the numbers
 - **Importance, not volume.** A 4 % block of the footage can be a chapter of its own.
 - **Energy follows the music.** The biggest musical moment gets the strongest picture, not a plate of food.

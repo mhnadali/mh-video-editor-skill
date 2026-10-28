@@ -14,6 +14,7 @@ Exit codes: 0 = success; 1 = a check failed (QA FAIL, lint errors, verify failed
 | [`rank`](#rank) | table of the best (or most energetic) clips |
 | [`pick`](#pick) | story-ordered candidate clip list (calm intro, build, payoff, calm end) |
 | [`beats`](#beats) | beat grid, tempo alternatives, downbeats and the drop of a music file |
+| [`vision`](#vision) | optional local, offline detection of people and faces (a plug-in with its own environment) |
 | [`story`](#story) | story-first selection: chapters, a storyboard to approve, and an audit of an EDL |
 | [`need`](#need) | how many clips a beat grid needs |
 | [`plan`](#plan) | beat grid + ordered clip list -> EDL |
@@ -88,7 +89,7 @@ mh_video score [-h] --work WORK [--workers WORKERS] [--limit LIMIT] [--rescore]
 Table of the best (or most energetic) clips.
 
 ```
-mh_video rank [-h] --work WORK [--by {quality,energy}] [--top TOP] [--allow-flagged] [--allow-similar] [--only ONLY] [--exclude EXCLUDE]
+mh_video rank [-h] --work WORK [--by {quality,energy}] [--top TOP] [--allow-flagged] [--allow-similar] [--only ONLY] [--exclude EXCLUDE] [--min-duration MIN_DURATION] [--keep-repeats]
 ```
 
 | Argument | Required / default | Meaning |
@@ -100,13 +101,15 @@ mh_video rank [-h] --work WORK [--by {quality,energy}] [--top TOP] [--allow-flag
 | `--allow-similar` |  | include look-alike clips |
 | `--only ONLY` |  | restrict to inventory indexes, e.g. 100-330,420-445 (choose them from the contact sheets) |
 | `--exclude EXCLUDE` |  | drop inventory indexes, e.g. 12,40-52 |
+| `--min-duration MIN_DURATION` | default `5.0` | ignore clips shorter than this many seconds (default 5; 0 = all) |
+| `--keep-repeats` |  | keep every take of a moment (default: only the best take of each) |
 
 ## `pick`
 
 Story-ordered candidate clip list (calm intro, build, payoff, calm end).
 
 ```
-mh_video pick [-h] --work WORK --count COUNT --out OUT [--intro-shots INTRO_SHOTS] [--beats BEATS] [--payoff-share PAYOFF_SHARE] [--allow-flagged] [--allow-similar] [--only ONLY] [--exclude EXCLUDE]
+mh_video pick [-h] --work WORK --count COUNT --out OUT [--intro-shots INTRO_SHOTS] [--beats BEATS] [--payoff-share PAYOFF_SHARE] [--allow-flagged] [--allow-similar] [--only ONLY] [--exclude EXCLUDE] [--min-duration MIN_DURATION] [--keep-repeats]
 ```
 
 | Argument | Required / default | Meaning |
@@ -121,6 +124,8 @@ mh_video pick [-h] --work WORK --count COUNT --out OUT [--intro-shots INTRO_SHOT
 | `--allow-similar` |  | include look-alike clips |
 | `--only ONLY` |  | restrict to inventory indexes, e.g. 100-330,420-445 (choose them from the contact sheets) |
 | `--exclude EXCLUDE` |  | drop inventory indexes, e.g. 12,40-52 |
+| `--min-duration MIN_DURATION` | default `5.0` | ignore clips shorter than this many seconds (default 5; 0 = all) |
+| `--keep-repeats` |  | keep every take of a moment (default: only the best take of each) |
 
 ## `beats`
 
@@ -139,12 +144,48 @@ mh_video beats [-h] [--out OUT] [--max-seconds MAX_SECONDS] [--bpm BPM] [--beats
 | `--beats-per-bar BEATS_PER_BAR` | default `4` | beats per bar for the downbeat grid (4 = common time, 3 = waltz) |
 | `--first-beat FIRST_BEAT` |  | time in seconds of the first beat (overrides the detected phase) |
 
+## `vision`
+
+Optional local, offline detection of people and faces (a plug-in with its own environment).
+
+```
+mh_video vision [-h] {status,run} ...
+```
+
+### `vision status`
+
+Is the plug-in set up, and has it been run on this work folder?.
+
+```
+mh_video vision status [-h] [--work WORK]
+```
+
+| Argument | Required / default | Meaning |
+|---|---|---|
+| `--work WORK` |  | work folder (inventory, scores, sheets, beats live here) |
+
+### `vision run`
+
+Look at a few frames of every clip and write vision.json (people, faces, scene labels).
+
+```
+mh_video vision run [-h] --work WORK [--only ONLY] [--frames FRAMES] [--onnx ONNX] [--labels LABELS]
+```
+
+| Argument | Required / default | Meaning |
+|---|---|---|
+| `--work WORK` | required | work folder (inventory, scores, sheets, beats live here) |
+| `--only ONLY` |  | inventory indexes, e.g. 100-330,420 |
+| `--frames FRAMES` | default `9` | frames looked at per clip |
+| `--onnx ONNX` |  | an image-classification model of your own (ONNX); adds scene labels |
+| `--labels LABELS` |  | text file with one label per line for --onnx |
+
 ## `story`
 
 Story-first selection: chapters, a storyboard to approve, and an audit of an EDL.
 
 ```
-mh_video story [-h] {chapters,select,audit} ...
+mh_video story [-h] {chapters,refine,exclusions,select,review,feedback,profile,audit} ...
 ```
 
 ### `story chapters`
@@ -161,12 +202,43 @@ mh_video story chapters [-h] --work WORK [--out OUT] [--gap GAP]
 | `--out OUT` |  | output file |
 | `--gap GAP` | default `35.0` | minutes of pause that start a new chapter (default 35) |
 
+### `story refine`
+
+Find the best moment inside every chosen clip (sharp, steady, the action peak) and set the start times.
+
+```
+mh_video story refine [-h] --work WORK --storyboard STORYBOARD [--out OUT] [--workers WORKERS]
+```
+
+| Argument | Required / default | Meaning |
+|---|---|---|
+| `--work WORK` | required | work folder (inventory, scores, sheets, beats live here) |
+| `--storyboard STORYBOARD` | required | storyboard.json written by `story select` |
+| `--out OUT` |  | output file |
+| `--workers WORKERS` | default `4` | parallel workers (default: min(4, CPUs)) |
+
+### `story exclusions`
+
+Which clips are left out and why (too short, shaky, covered, the weaker take of a moment ...).
+
+```
+mh_video story exclusions [-h] --work WORK [--chapters CHAPTERS] [--notes NOTES] [--out OUT] [--min-duration MIN_DURATION]
+```
+
+| Argument | Required / default | Meaning |
+|---|---|---|
+| `--work WORK` | required | work folder (inventory, scores, sheets, beats live here) |
+| `--chapters CHAPTERS` |  | chapters.json (its `filters` and `dedupe` settings apply) |
+| `--notes NOTES` |  | shot-notes.json: the agent's reading of the footage (role, mood, people, topic, shot_size ...) |
+| `--out OUT` |  | output file |
+| `--min-duration MIN_DURATION` |  | seconds (default 5) |
+
 ### `story select`
 
 Choose the shots for the chapters and the music; writes storyboard.json/.md and a clip list.
 
 ```
-mh_video story select [-h] --work WORK --beats BEATS --chapters CHAPTERS [--notes NOTES] --duration DURATION [--body-start BODY_START] [--pacing {beat,energy}] [--intro-shots INTRO_SHOTS] [--period PERIOD] [--out OUT] [--clips CLIPS]
+mh_video story select [-h] --work WORK --beats BEATS --chapters CHAPTERS [--notes NOTES] --duration DURATION [--body-start BODY_START] [--pacing {beat,energy}] [--intro-shots INTRO_SHOTS] [--period PERIOD] [--out OUT] [--clips CLIPS] [--variant {balanced,action,people}] [--variants] [--method {beam,greedy}] [--profile PROFILE] [--no-profile]
 ```
 
 | Argument | Required / default | Meaning |
@@ -182,6 +254,57 @@ mh_video story select [-h] --work WORK --beats BEATS --chapters CHAPTERS [--note
 | `--period PERIOD` |  | override the beat period in seconds |
 | `--out OUT` |  | output file |
 | `--clips CLIPS` |  | text file: one clip path per line, optional ` @ seconds` |
+| `--variant VARIANT` | default `balanced`; one of `balanced`, `action`, `people` | how the story is told: balanced, action first, or people first |
+| `--variants` |  | write all three variants and print a comparison table |
+| `--method METHOD` | one of `beam`, `greedy` | beam = optimise the whole sequence at once (default); greedy = chapter by chapter (the 0.15 behaviour) |
+| `--profile PROFILE` |  | profile.json of remembered preferences (default: <work>/profile.json and the global one) |
+| `--no-profile` |  | ignore remembered preferences |
+
+### `story review`
+
+Write an offline HTML page to review a storyboard: frames, alternates, keep / replace / ban.
+
+```
+mh_video story review [-h] --work WORK --storyboard STORYBOARD [--out OUT] [--beats BEATS] [--notes NOTES]
+```
+
+| Argument | Required / default | Meaning |
+|---|---|---|
+| `--work WORK` | required | work folder (inventory, scores, sheets, beats live here) |
+| `--storyboard STORYBOARD` | required | storyboard.json written by `story select` |
+| `--out OUT` |  | output file |
+| `--beats BEATS` |  | beats.json from the `beats` command |
+| `--notes NOTES` |  | shot-notes.json: the agent's reading of the footage (role, mood, people, topic, shot_size ...) |
+
+### `story feedback`
+
+Apply the decisions exported from the review page: update the storyboard and learn the user's taste.
+
+```
+mh_video story feedback [-h] --work WORK --storyboard STORYBOARD --feedback FEEDBACK [--out OUT] [--profile PROFILE] [--notes NOTES]
+```
+
+| Argument | Required / default | Meaning |
+|---|---|---|
+| `--work WORK` | required | work folder (inventory, scores, sheets, beats live here) |
+| `--storyboard STORYBOARD` | required | storyboard.json written by `story select` |
+| `--feedback FEEDBACK` | required | decisions.json exported by the review page |
+| `--out OUT` |  | output file |
+| `--profile PROFILE` |  | profile.json of remembered preferences (default: <work>/profile.json and the global one) |
+| `--notes NOTES` |  | shot-notes.json: the agent's reading of the footage (role, mood, people, topic, shot_size ...) |
+
+### `story profile`
+
+Show the remembered preferences.
+
+```
+mh_video story profile [-h] --work WORK [--profile PROFILE]
+```
+
+| Argument | Required / default | Meaning |
+|---|---|---|
+| `--work WORK` | required | work folder (inventory, scores, sheets, beats live here) |
+| `--profile PROFILE` |  | profile.json of remembered preferences (default: <work>/profile.json and the global one) |
 
 ### `story audit`
 

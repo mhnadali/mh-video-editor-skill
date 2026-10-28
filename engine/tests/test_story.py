@@ -185,7 +185,7 @@ class Selection(unittest.TestCase):
         sc[41]["internal_cut"] = True
         for i in range(30, 60):
             if i not in (40, 41):
-                sc[i]["quality"] = 20.0                            # everything else is poor: the flagged ones would otherwise win
+                sc[i]["quality"] = 60.0                            # everything else is merely fair: the flagged ones would otherwise win
         sc[40]["quality"] = sc[41]["quality"] = 99.0
         notes = {"clip44.mp4": {"skip": True}}
         sb = self.run_select(inv, sc, cfg, notes)
@@ -270,8 +270,8 @@ class Selection(unittest.TestCase):
         sc[45]["energy"] = 99.0
         sb = self.run_select(inv, sc, cfg)
         rows = [r for r in sb["rows"] if r["chapter"] == "action"]
-        loudest = max(rows, key=lambda r: r["music"])
-        self.assertEqual(loudest["clip"], 45)
+        top = max(r["music"] for r in rows)
+        self.assertIn(45, [r["clip"] for r in rows if r["music"] == top])          # one of the loudest slots (several share the maximum)
 
     def test_the_slot_of_the_drop_gets_the_loudest_energy(self):
         beats = dict(BEATS, drop=4.4)                              # on the beat grid: 0.2 + 7 * 0.6

@@ -162,11 +162,22 @@ def _load_candidates(a, skip_flagged=True, skip_similar=True):
     return recs, scores
 
 
+def _weaker_takes(a, recs, scores) -> set:
+    """Indexes of clips that are the weaker take of a moment filmed more than once (unless --keep-repeats)."""
+    if getattr(a, "keep_repeats", False):
+        return set()
+    import vid_filter
+    res = vid_filter.exclusions(recs, scores, None, {"min_duration": 0.0, "block_flags": [], "block_shaky": False,
+                                                       "block_covered": False, "block_internal_cut": False, "min_quality": 0.0})
+    return {i for i, why in res["reasons"].items() if any(w.startswith("same-moment") for w in why)}
+
+
 def cmd_rank(a) -> int:
     import vid_score
     recs, scores = _load_candidates(a)
+    drop = (vid_score.parse_index_spec(a.exclude) or set()) | _weaker_takes(a, recs, scores)
     cands = vid_score.candidates(recs, scores, skip_flagged=not a.allow_flagged, skip_similar=not a.allow_similar,
-                                 only=vid_score.parse_index_spec(a.only), exclude=vid_score.parse_index_spec(a.exclude))
+                                 only=vid_score.parse_index_spec(a.only), exclude=drop, min_duration=a.min_duration)
     key = {"quality": lambda c: -c["quality"], "energy": lambda c: (-c["energy"], -c["quality"])}[a.by]
     print(f"{'idx':>4} {'quality':>7} {'energy':>6} {'blur':>5} {'bright':>6}  flags / name")
     for c in sorted(cands, key=key)[: a.top]:
@@ -180,8 +191,9 @@ def cmd_pick(a) -> int:
     import vid_plan
     import vid_score
     recs, scores = _load_candidates(a)
+    drop = (vid_score.parse_index_spec(a.exclude) or set()) | _weaker_takes(a, recs, scores)
     cands = vid_score.candidates(recs, scores, skip_flagged=not a.allow_flagged, skip_similar=not a.allow_similar,
-                                 only=vid_score.parse_index_spec(a.only), exclude=vid_score.parse_index_spec(a.exclude))
+                                 only=vid_score.parse_index_spec(a.only), exclude=drop, min_duration=a.min_duration)
     intro, outro = a.intro_shots, 1
     body = a.count - intro - outro
     if body < 2:
@@ -285,12 +297,28 @@ def cmd_qa(a) -> int:
     return 1 if rep["verdict"] == "fail" else 0
 
 
+def cmd_vision(a) -> int:
+    import vid_vision
+    if a.action == "status":
+        py = vid_vision.plugin_python()
+        print(f"vision plug-in: {'ready (' + str(py) + ')' if py else 'not set up (python plugins/vision/setup.py)'}")
+        if a.work:
+            v = vid_vision.load(a.work)
+            print(f"vision.json: {vid_vision.summarize(v) if v else 'not created yet (vision run)'}")
+        return 0
+    v = vid_vision.run(a.work, only=a.only, onnx=a.onnx, labels=a.labels, frames=a.frames)
+    print(vid_vision.summarize(v))
+    return 0
+
+
 def cmd_story(a) -> int:
     import vid_probe
     import vid_score
     import vid_story
+    import vid_vision
     inv = vid_probe.load_inventory(a.work)
     scores = vid_score.load_scores(a.work)
+    vid_vision.merge_into_scores(scores, vid_vision.load(a.work))             # people and faces, if the plug-in was run
     work = Path(a.work)
     if a.action == "chapters":
         cfg = vid_story.propose_chapters(inv, scores, a.gap)
@@ -304,13 +332,99 @@ def cmd_story(a) -> int:
         return 0
     beats = vl.load_json(a.beats) if getattr(a, "beats", None) else None
     notes = vl.load_json(a.notes) if getattr(a, "notes", None) else None
+    if a.action == "refine":
+        import vid_moment
+        sb = vl.load_json(a.storyboard)
+        res = vid_moment.refine_storyboard(sb, inv, scores, a.work, workers=a.workers, log=print)
+        out = Path(a.out or a.storyboard)
+        vl.save_json(out, res)
+        out.with_suffix(".md").write_text(vid_story.storyboard_markdown(res), encoding="utf-8")
+        clips = out.with_name(out.stem + "-clips.txt")
+        clips.write_text(vid_story.clip_list_text(res), encoding="utf-8")
+        for r in res["rows"]:
+            m = r.get("moment") or {}
+            print(f"  slot {r['slot']:>2} clip {r['clip']:>3}: start {r['start']:>6.2f}s  {m.get('motion_type', m.get('error', '?')):10} "
+                  f"score {m.get('score', '-')}  peak at {m.get('peak_at', '-')}  action ends {m.get('end_of_action', '-')}")
+        print(f"wrote {out}, {out.with_suffix('.md')} and {clips}")
+        return 0
+    if a.action == "exclusions":
+        import csv
+        import vid_filter
+        cfg = vl.load_json(a.chapters) if a.chapters else {}
+        filters = dict(cfg.get("filters") or {})
+        if a.min_duration is not None:
+            filters["min_duration"] = a.min_duration
+        res = vid_filter.exclusions(inv, scores, notes, filters, cfg.get("dedupe"))
+        print(vid_filter.format_report(res, inv))
+        by = {r["index"]: r for r in inv}
+        out = Path(a.out or work / "exclusions.json")
+        vl.save_json(out, {"summary": vid_filter.summarize(res, sum(1 for r in inv if r.get("dup_of") is None)),
+                           "reasons": {str(i): w for i, w in sorted(res["reasons"].items())}, "clusters": res["clusters"]})
+        with open(out.with_suffix(".csv"), "w", newline="", encoding="utf-8") as fh:
+            w = csv.writer(fh)
+            w.writerow(["index", "taken", "device", "duration", "reasons", "name"])
+            for i, why in sorted(res["reasons"].items()):
+                r = by[i]
+                w.writerow([i, r.get("taken", ""), r.get("device", ""), round(r.get("duration") or 0, 1), " ".join(why), r["name"]])
+        print(f"wrote {out} and {out.with_suffix('.csv')}: why each clip is left out")
+        return 0
+    import vid_profile
+    if a.action == "profile":
+        prof = vid_profile.load_for(a.work, a.profile)
+        print(vid_profile.describe(prof))
+        return 0
+    if a.action == "feedback":
+        sb = vl.load_json(a.storyboard)
+        fb = vl.load_json(a.feedback)
+        notes_by = vid_story.cl.notes_by_path(notes)
+        views = {r["index"]: vid_story.clip_view(r, scores[r["index"]], vid_story._note(notes_by, r))      # noqa: SLF001
+                 for r in inv if r["index"] in scores and "quality" in scores[r["index"]]}
+        ppath = Path(a.profile or work / "profile.json")
+        prof, rows = vid_profile.learn(vid_profile.load(ppath), sb, fb, inv, views)
+        vid_profile.save(prof, ppath)
+        out = Path(a.out or a.storyboard)
+        vl.save_json(out, dict(sb, rows=rows))
+        out.with_suffix(".md").write_text(vid_story.storyboard_markdown(dict(sb, rows=rows)), encoding="utf-8")
+        out.with_name(out.stem + "-clips.txt").write_text(vid_story.clip_list_text(dict(sb, rows=rows)), encoding="utf-8")
+        print(vid_profile.describe(prof))
+        print(f"wrote {ppath} and the updated storyboard {out}; the next `story select` uses what was learned")
+        return 0
+    if a.action == "review":
+        import vid_review
+        sb = vl.load_json(a.storyboard)
+        out = Path(a.out or Path(a.storyboard).with_name("review.html"))
+        vid_review.write(out, sb, inv, scores, a.work, beats=beats, notes=notes, log=print)
+        print(f"wrote {out}: open it in a browser (it works offline); decide, then press 'Export decisions' and run "
+              f"`story feedback --feedback decisions.json`")
+        return 0
     cfg = vl.load_json(a.chapters)
     if a.action == "select":
         if not beats:
             raise vl.EngineError("story select needs --beats")
-        sb = vid_story.select(inv, scores, beats, cfg, notes, duration=a.duration, body_start=a.body_start, pacing=a.pacing,
-                              intro_shots=a.intro_shots, period=a.period)
+        profile = None
+        if not a.no_profile:
+            profile = vid_profile.load_for(a.work, a.profile)
+            if not (profile["weights"] or profile["topics"] or profile["roles"] or profile["banned"] or profile["favoured"]
+                    or profile["pins"]):
+                profile = None
+            else:
+                print("using remembered preferences:\n" + vid_profile.describe(profile))
+        kw = dict(duration=a.duration, body_start=a.body_start, pacing=a.pacing, intro_shots=a.intro_shots, period=a.period,
+                  method=a.method, profile=profile)
         out = Path(a.out or work / "storyboard.json")
+        if a.variants:
+            sbs = vid_story.select_variants(inv, scores, beats, cfg, notes, **kw)
+            for name, one in sbs.items():
+                vp = out.with_name(f"{out.stem}.{name}.json")
+                vl.save_json(vp, one)
+                vp.with_suffix(".md").write_text(vid_story.storyboard_markdown(one), encoding="utf-8")
+                vp.with_name(vp.stem + "-clips.txt").write_text(vid_story.clip_list_text(one), encoding="utf-8")
+            print(vid_story.format_comparison(vid_story.compare_variants(sbs)))
+            print(f"wrote {out.stem}.<variant>.json/.md and -clips.txt for {', '.join(sbs)}; show the user the comparison and the "
+                  "storyboard of the variant they prefer")
+            sb = sbs[a.variant]
+        else:
+            sb = vid_story.select(inv, scores, beats, cfg, notes, variant=a.variant, **kw)
         vl.save_json(out, sb)
         out.with_suffix(".md").write_text(vid_story.storyboard_markdown(sb), encoding="utf-8")
         clips = Path(a.clips) if a.clips else out.with_name(out.stem + "-clips.txt")
@@ -486,6 +600,18 @@ def cmd_verify(a) -> int:
 
 
 ARG_HELP = {
+    "frames": "frames looked at per clip",
+    "profile": "profile.json of remembered preferences (default: <work>/profile.json and the global one)",
+    "no_profile": "ignore remembered preferences",
+    "feedback": "decisions.json exported by the review page",
+    "onnx": "an image-classification model of your own (ONNX); adds scene labels",
+    "labels": "text file with one label per line for --onnx",
+    "variant": "how the story is told: balanced, action first, or people first",
+    "variants": "write all three variants and print a comparison table",
+    "method": "beam = optimise the whole sequence at once; greedy = chapter by chapter",
+    "storyboard": "storyboard.json written by `story select`",
+    "min_duration": "ignore clips shorter than this many seconds (default 5; 0 = all)",
+    "keep_repeats": "keep every take of a moment (default: only the best take of each)",
     "chapters": "chapters.json: the story's chapters (name, from, to, weight, energy ...)",
     "body_start": "seconds where the beat-by-beat body starts (use the music's drop time to land the flash on the first body cut)",
     "pacing": "beat = one shot per beat; energy = hold calm beats, cut fast on strong ones",
@@ -568,6 +694,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--allow-similar", action="store_true")
     p.add_argument("--only", help="restrict to inventory indexes, e.g. 100-330,420-445 (choose them from the contact sheets)")
     p.add_argument("--exclude", help="drop inventory indexes, e.g. 12,40-52")
+    p.add_argument("--min-duration", type=float, default=5.0, help="ignore clips shorter than this many seconds (default 5; 0 = all)")
+    p.add_argument("--keep-repeats", action="store_true", help="keep every take of a moment (default: only the best take of each)")
     p.set_defaults(fn=cmd_rank)
     p = sub.add_parser("pick", help="story-ordered candidate clip list (calm intro, build, payoff, calm end)")
     p.add_argument("--work", required=True); p.add_argument("--count", type=int, required=True); p.add_argument("--out", required=True)
@@ -576,6 +704,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--allow-similar", action="store_true")
     p.add_argument("--only", help="restrict to inventory indexes, e.g. 100-330,420-445 (choose them from the contact sheets)")
     p.add_argument("--exclude", help="drop inventory indexes, e.g. 12,40-52")
+    p.add_argument("--min-duration", type=float, default=5.0, help="ignore clips shorter than this many seconds (default 5; 0 = all)")
+    p.add_argument("--keep-repeats", action="store_true", help="keep every take of a moment (default: only the best take of each)")
     p.set_defaults(fn=cmd_pick)
     p = sub.add_parser("need", help="how many clips a beat grid needs")
     p.add_argument("beats"); p.add_argument("--duration", type=float); p.add_argument("--period", type=float)
@@ -599,17 +729,49 @@ def build_parser() -> argparse.ArgumentParser:
                    help="choose cuts and transitions from the content of each shot pair, with a written reason (needs --scores)")
     p.add_argument("--notes", help="shot-notes.json written by the agent (overrides measurements; with --smart-transitions)")
     p.set_defaults(fn=cmd_plan)
+    p = sub.add_parser("vision", help="optional local, offline detection of people and faces (a plug-in with its own environment)")
+    vsub = p.add_subparsers(dest="action", required=True)
+    q = vsub.add_parser("status", help="is the plug-in set up, and has it been run on this work folder?")
+    q.add_argument("--work")
+    q = vsub.add_parser("run", help="look at a few frames of every clip and write vision.json (people, faces, scene labels)")
+    q.add_argument("--work", required=True); q.add_argument("--only", help="inventory indexes, e.g. 100-330,420")
+    q.add_argument("--frames", type=int, default=9, help="frames looked at per clip")
+    q.add_argument("--onnx", help="an image-classification model of your own (ONNX); adds scene labels")
+    q.add_argument("--labels", help="text file with one label per line for --onnx")
+    p.set_defaults(fn=cmd_vision)
     p = sub.add_parser("story", help="story-first selection: chapters, a storyboard to approve, and an audit of an EDL")
     ssub = p.add_subparsers(dest="action", required=True)
     q = ssub.add_parser("chapters", help="draft chapters from the capture timeline (name them, weight them, then select)")
     q.add_argument("--work", required=True); q.add_argument("--out"); q.add_argument("--gap", type=float, default=35.0,
                    help="minutes of pause that start a new chapter (default 35)")
+    q = ssub.add_parser("refine", help="find the best moment inside every chosen clip (sharp, steady, the action peak) and set the start times")
+    q.add_argument("--work", required=True); q.add_argument("--storyboard", required=True); q.add_argument("--out")
+    q.add_argument("--workers", type=int, default=4)
+    q = ssub.add_parser("exclusions", help="which clips are left out and why (too short, shaky, covered, the weaker take of a moment ...)")
+    q.add_argument("--work", required=True); q.add_argument("--chapters", help="chapters.json (its `filters` and `dedupe` settings apply)")
+    q.add_argument("--notes"); q.add_argument("--out"); q.add_argument("--min-duration", type=float, help="seconds (default 5)")
     q = ssub.add_parser("select", help="choose the shots for the chapters and the music; writes storyboard.json/.md and a clip list")
     q.add_argument("--work", required=True); q.add_argument("--beats", required=True); q.add_argument("--chapters", required=True)
     q.add_argument("--notes", help="shot-notes.json (role, mood, people, topic, shot_size, skip)")
     q.add_argument("--duration", type=float, required=True); q.add_argument("--body-start", type=float)
     q.add_argument("--pacing", choices=["beat", "energy"], default="energy"); q.add_argument("--intro-shots", type=int, default=2)
     q.add_argument("--period", type=float); q.add_argument("--out"); q.add_argument("--clips")
+    q.add_argument("--variant", default="balanced", choices=["balanced", "action", "people"],
+                   help="how the story is told: balanced, action first, or people first")
+    q.add_argument("--variants", action="store_true", help="write all three variants and print a comparison table")
+    q.add_argument("--method", choices=["beam", "greedy"], default=None,
+                   help="beam = optimise the whole sequence at once (default); greedy = chapter by chapter (the 0.15 behaviour)")
+    q.add_argument("--profile", help="profile.json of remembered preferences (default: <work>/profile.json and the global one)")
+    q.add_argument("--no-profile", action="store_true", help="ignore remembered preferences")
+    q = ssub.add_parser("review", help="write an offline HTML page to review a storyboard: frames, alternates, keep / replace / ban")
+    q.add_argument("--work", required=True); q.add_argument("--storyboard", required=True); q.add_argument("--out")
+    q.add_argument("--beats"); q.add_argument("--notes")
+    q = ssub.add_parser("feedback", help="apply the decisions exported from the review page: update the storyboard and learn the user's taste")
+    q.add_argument("--work", required=True); q.add_argument("--storyboard", required=True)
+    q.add_argument("--feedback", required=True, help="decisions.json exported by the review page"); q.add_argument("--out")
+    q.add_argument("--profile"); q.add_argument("--notes")
+    q = ssub.add_parser("profile", help="show the remembered preferences")
+    q.add_argument("--work", required=True); q.add_argument("--profile")
     q = ssub.add_parser("audit", help="check an EDL against the story principles (chapters, cameras, people, energy vs music, order)")
     q.add_argument("edl"); q.add_argument("--work", required=True); q.add_argument("--beats"); q.add_argument("--notes")
     q.add_argument("--chapters"); q.add_argument("--free-order", action="store_true", help="do not require the trip order")

@@ -20,7 +20,7 @@ def fake(index, quality=80.0, energy=50.0, flags=None, similar_to=None, dup_of=N
     return {"index": index, "path": path or f"clip{index}.mp4", "name": f"clip{index}.mp4", "duration": 5.0,
             "dup_of": dup_of, "error": None, "quality": quality, "energy": energy, "flags": flags or [],
             "similar_to": similar_to, "best_start": 1.0 + index / 10, "blur": 4.0, "brightness": 120.0, "motion": 5.0,
-            "flux": 0.0, "wins": [[0.0, 80.0, 1.0]]}
+            "flux": 0.0, "wins": [[0.0, 80.0, 1.0]], "hashes": [0, 0, 0]}
 
 
 class Pure(unittest.TestCase):
@@ -282,7 +282,7 @@ class Measured(unittest.TestCase):
         self.assertEqual(mh_video.main(["rank", "--work", str(work), "--only", "zero"]), 2)
         out = self.root / "picked.txt"
         self.assertEqual(mh_video.main(["pick", "--work", str(work), "--count", "6", "--out", str(out), "--allow-similar",
-                                        "--allow-flagged"]), 0)
+                                        "--allow-flagged", "--min-duration", "0", "--keep-repeats"]), 0)
         lines = [l for l in out.read_text(encoding="utf-8").splitlines() if l.strip()]
         self.assertEqual(len(lines), 6)
         self.assertTrue(all(" @ " in l for l in lines))
