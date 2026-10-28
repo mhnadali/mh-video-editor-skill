@@ -1,6 +1,6 @@
 # M.H. Video Editor Skill
 
-![Version](https://img.shields.io/badge/version-0.8.0-blue)
+![Version](https://img.shields.io/badge/version-0.12.0-blue)
 ![Claude Code](https://img.shields.io/badge/Claude%20Code-skill%20%2B%20agent-orange)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
@@ -67,6 +67,9 @@ python engine/scripts/mh_video.py qa work/trip.mp4 --edl work/video.edl.json --s
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | Modules, timing model, per-shot filter chain, roadmap |
 | [`references/`](references/) | EDL format, colour, motion, text, formats, sound design, delivery, QA gate, pitfalls, effect budget |
 | [`references/delivery.md`](references/delivery.md) | Delivery presets, size/bitrate targeting, manifest, bundle |
+| [`references/cut-craft.md`](references/cut-craft.md) | Which cut and why: catalogue of cut types, rules, the question to ask at every boundary |
+| [`references/transition-craft.md`](references/transition-craft.md) | What each transition family says, a decision tree, direction rule |
+| [`references/footage-reading.md`](references/footage-reading.md) | Reading the raw clips; `shot-notes.json`; the cut-plan table |
 | [`references/editorial-rubric.md`](references/editorial-rubric.md) | The craft of the cut: priorities, shot grammar, pacing, music structure |
 | [`docs/ROADMAP.md`](docs/ROADMAP.md) | State, the MP4 export / size-reduction layer with research and measurements, the post-0.5 roadmap, hand-off notes |
 | [`SUPPORT.md`](SUPPORT.md) | Platform / FFmpeg support matrix and how to get help |

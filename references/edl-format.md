@@ -46,6 +46,16 @@ Ordered, contiguous (each starts where the previous ended, to half a frame; the 
 ## transitions
 Keys are cut points: `"j"` is the cut between shot `j-1` and shot `j` (1 .. n-1). Missing = hard cut. Names: any xfade transition except the banned ones (see `references/effects-and-transitions.md`). With `drop_flash` on, the cut that carries the drop becomes `fadewhite` automatically.
 
+## transition_frames (optional, 0.11)
+Frames a transition overlaps, per cut: `"transition_frames": {"2": 12}`. Even whole numbers from 2 to 24; default 4 (about 0.13 s at 30 fps). The overlap is split evenly over the two shots, so the cut stays where it was and the video keeps its length. `lint` errors when a shot is too short to hold its overlaps and warns for a key with no transition. Longer values (8-12) suit dissolves and fades in calm stretches; keep energetic slides at 4-6.
+
+## shot.audio lead / lag (optional, 0.11)
+With `style.ambient` on, `shots[i].audio` accepts `lead` (J-cut: the shot's own sound enters this many seconds before its picture) and `lag` (L-cut: it lingers this many seconds after its picture), 0 to 1.0 s each. A lead is cut down to what fits before the start of the video or of the source clip; retimed shots keep their sound as it was. The music stays the main bed, so J/L-cuts only matter where the clips' sound is audible.
+
+## rationale (optional, 0.10)
+Why each boundary is the kind of cut it is, written by `cuts --write` / `plan --smart-transitions` or by you:
+`"rationale": {"3": {"type": "motion-bridge", "why": "A ends moving left; a slide left carries it"}}`. Keys are cut numbers like `transitions`; `type` and a non-empty `why` are required. Types: `cut-on-action`, `graphic-match`, `contrast-cut`, `size-step`, `montage-cut`, `direction-clash`, `jump-risk` (hard cuts); `impact`, `closing`, `section-lift`, `motion-bridge`, `soften`, `calm-dissolve` (transitions). Once an EDL has a `rationale`, `lint` warns (`transition-unmotivated`) for every transition without one. See `references/cut-craft.md`.
+
 ## style
 | Key | Default | Meaning |
 |---|---|---|

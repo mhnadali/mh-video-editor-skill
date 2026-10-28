@@ -10,7 +10,9 @@ and reviewable, never a hidden decision.
 """
 from __future__ import annotations
 
+import math
 import subprocess
+from typing import Optional
 
 import vid_sheets
 import vidlib as vl
@@ -31,6 +33,103 @@ def gray_frames(clip: str, start: float, dur: float, n: int = 6, w: int = GW, h:
     data = r.stdout or b""
     fs = w * h
     return [data[i * fs:(i + 1) * fs] for i in range(len(data) // fs) if len(data[i * fs:(i + 1) * fs]) == fs]
+
+
+def rgb_frames(clip: str, start: float, dur: float, n: int = 3, w: int = 16, h: int = 9, hdr: bool = False) -> list[bytes]:
+    """`n` tiny RGB frames (w*h*3 bytes each) of a window, for colour measurements. [] if nothing decodes."""
+    tm = vid_sheets.TONEMAP_HLG if hdr else ""
+    fps = max(1.0, n / max(dur, 1e-3))
+    cmd = [vl.find_ffmpeg()["ffmpeg"], "-v", "error", "-ss", f"{max(0.0, start):.2f}", "-t", f"{max(0.05, dur):.2f}",
+           "-i", vl.ffp(clip), "-an", "-vf", f"{tm}scale={w}:{h},format=rgb24,fps={fps:.3f}",
+           "-frames:v", str(n), "-f", "rawvideo", "-pix_fmt", "rgb24", "-"]
+    r = subprocess.run(cmd, capture_output=True)
+    data = r.stdout or b""
+    fs = w * h * 3
+    return [data[i * fs:(i + 1) * fs] for i in range(len(data) // fs) if len(data[i * fs:(i + 1) * fs]) == fs]
+
+
+def _hue_angle(r: float, g: float, b: float, v: float, c: float) -> float:
+    """Hue as an angle in radians (0 = red) from RGB in 0..1; grey pixels (no chroma) have weight 0 anyway."""
+    if c <= 0:
+        return 0.0
+    if v == r:
+        h = ((g - b) / c) % 6
+    elif v == g:
+        h = (b - r) / c + 2
+    else:
+        h = (r - g) / c + 4
+    return math.pi * h / 3.0
+
+
+def dominant_hue(frames: list[bytes]) -> tuple[Optional[float], float]:
+    """(hue in 0..1 of the most colourful pixels, mean saturation 0..1). Hue is None for a grey picture.
+
+    Pixels are weighted by their saturation, so a grey road under a blue sky reads as blue, not as nothing."""
+    sx = sy = wsum = sat_total = 0.0
+    count = 0
+    for fr in frames:
+        for i in range(0, len(fr) - 2, 3):
+            r, g, b = fr[i] / 255.0, fr[i + 1] / 255.0, fr[i + 2] / 255.0
+            v = max(r, g, b)
+            c = v - min(r, g, b)
+            s = c / v if v > 0 else 0.0
+            wgt = s * v
+            ang = _hue_angle(r, g, b, v, c)
+            sx += wgt * math.cos(ang)
+            sy += wgt * math.sin(ang)
+            wsum += wgt
+            sat_total += s
+            count += 1
+    if not count:
+        return None, 0.0
+    mean_sat = sat_total / count
+    if wsum < 1e-6 or (sx * sx + sy * sy) ** 0.5 / wsum < 0.2 or mean_sat < 0.08:
+        return None, round(mean_sat, 3)
+    return round((math.atan2(sy, sx) / (2 * math.pi)) % 1.0, 3), round(mean_sat, 3)
+
+
+def hue_distance(a: Optional[float], b: Optional[float]) -> Optional[float]:
+    """Circular distance between two hues, 0 (same) to 0.5 (opposite); None if either picture is grey."""
+    if a is None or b is None:
+        return None
+    d = abs(a - b) % 1.0
+    return min(d, 1.0 - d)
+
+
+def flux(frames: list[bytes]) -> float:
+    """Largest mean absolute change between consecutive analysis frames (0-255). A very large value inside one clip
+    means the clip itself contains a cut or a flash, which makes it a poor single shot."""
+    worst = 0.0
+    for a, b in zip(frames, frames[1:]):
+        if len(a) != len(b) or not a:
+            continue
+        worst = max(worst, sum(abs(x - y) for x, y in zip(a, b)) / len(a))
+    return round(worst, 2)
+
+
+def local_motion(frames: list[bytes], w: int = GW, h: int = GH) -> float:
+    """Share (0-1) of the picture that still changes after the camera's own motion is cancelled: a moving subject
+    (rider, wave, person) over a steady or panning background. Near 0 = only the camera moves (or nothing does)."""
+    if len(frames) < 2 or _texture(frames[0], w, h) < 2.0:
+        return 0.0
+    shares = []
+    for k in range(1, len(frames)):
+        dx, dy = motion_between(frames[k - 1], frames[k], w, h)
+        a, b = frames[k - 1], frames[k]
+        changed = total = 0
+        for y in range(h):
+            yy = y + dy
+            if yy < 0 or yy >= h:
+                continue
+            for x in range(w):
+                xx = x + dx
+                if xx < 0 or xx >= w:
+                    continue
+                total += 1
+                if abs(a[y * w + x] - b[yy * w + xx]) > 28:
+                    changed += 1
+        shares.append(changed / max(total, 1))
+    return round(sum(shares) / len(shares), 3)
 
 
 def _grad(frame: bytes, w: int, h: int) -> list[int]:
@@ -150,12 +249,19 @@ def measure_shot(clip: str, start: float, dur: float, hdr: bool = False) -> dict
     mid = frames[len(frames) // 2]
     dx, dy, mag = motion_vector(frames)
     cx, cy = saliency_centroid(frames)
-    return {"shot_size": shot_size(mid), "motion_dx": dx, "motion_dy": dy, "motion_mag": mag,
-            "focus_x": cx, "focus_y": cy}
+    out = {"shot_size": shot_size(mid), "motion_dx": dx, "motion_dy": dy, "motion_mag": mag,
+           "focus_x": cx, "focus_y": cy, "flux": flux(frames), "local_motion": local_motion(frames)}
+    try:
+        hue, sat = dominant_hue(rgb_frames(clip, start, min(max(dur, 0.3), 2.0), hdr=hdr))
+        out["hue"], out["colourfulness"] = hue, sat
+    except OSError:
+        pass
+    return out
 
 
 # --------------------------------------------------------------------------- editorial lint (Track A)
 
+FLUX_CUT = 70.0                       # mean frame-to-frame change (0-255) that means the clip itself cuts or flashes
 PACING_FLAT_CV = 0.08                 # coefficient of variation below which pacing is "monotone"
 SCREEN_DIR_MIN = 1.2                  # analysis-pixels of horizontal motion to count as a clear direction
 
@@ -205,6 +311,23 @@ def editorial_issues(edl: dict, feats: list[dict], bounds: list[int], trans: dic
         if abs(da) >= SCREEN_DIR_MIN and abs(db) >= SCREEN_DIR_MIN and (da > 0) != (db > 0):
             out.append(_issue("info", "screen-direction",
                               f"shot {j - 1}->{j}: camera motion reverses direction across the cut (check the 180-degree line)"))
+    # a clip that contains its own cut or flash is a poor single shot
+    for j in range(n):
+        f = feats[j] if j < len(feats) else {}
+        if f and (f.get("flux") or 0) >= FLUX_CUT:
+            out.append(_issue("warn", "internal-cut",
+                              f"shot {j}: the clip changes abruptly inside the chosen window (a cut or flash in the source); "
+                              "pick another start (`src_start`) or another clip"))
+    # a directional slide/wipe should continue the content's movement, not fight it
+    import vid_cutlogic as _cl
+    for j, name in sorted(trans.items()):
+        want = _cl.TRANSITION_DIRECTION.get(name)
+        a = feats[j - 1] if 0 <= j - 1 < len(feats) else {}
+        if want in ("left", "right") and a and a.get("motion_dx") is not None and abs(a["motion_dx"]) >= SCREEN_DIR_MIN:
+            if (a["motion_dx"] < 0) != (want == "left"):
+                out.append(_issue("warn", "direction-mismatch",
+                                  f"cut {j}: '{name}' moves {want} but the outgoing shot's content moves "
+                                  f"{'left' if a['motion_dx'] < 0 else 'right'}; use the mirror transition or a hard cut"))
     # pacing: flat shot-length rhythm carries no emotion
     lens = [bounds[j + 1] - bounds[j] for j in range(n)]
     if n >= 5:

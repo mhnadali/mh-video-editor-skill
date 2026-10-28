@@ -19,7 +19,8 @@ NEEDS_FF = unittest.skipUnless(helpers.ffmpeg_available(), "ffmpeg not installed
 def fake(index, quality=80.0, energy=50.0, flags=None, similar_to=None, dup_of=None, path=None):
     return {"index": index, "path": path or f"clip{index}.mp4", "name": f"clip{index}.mp4", "duration": 5.0,
             "dup_of": dup_of, "error": None, "quality": quality, "energy": energy, "flags": flags or [],
-            "similar_to": similar_to, "best_start": 1.0 + index / 10, "blur": 4.0, "brightness": 120.0, "motion": 5.0}
+            "similar_to": similar_to, "best_start": 1.0 + index / 10, "blur": 4.0, "brightness": 120.0, "motion": 5.0,
+            "flux": 0.0}
 
 
 class Pure(unittest.TestCase):
@@ -148,6 +149,9 @@ class Pure(unittest.TestCase):
             e = fake(r["index"], path=r["path"])
             e.update(size=r["size"], mtime=r["mtime"], motion=float(r["index"]))
             previous[r["path"]] = e
+        stale = dict(previous["x0.mp4"])
+        stale.pop("flux")                                                    # measured before the colour/flux fields existed
+        self.assertNotIn("flux", stale)
         out = vs.score_inventory(recs, hw=False, previous=previous)           # no FFmpeg needed: all reused
         self.assertEqual([s["index"] for s in out], [0, 1, 2, 3])
         self.assertTrue(all("energy" in s for s in out))

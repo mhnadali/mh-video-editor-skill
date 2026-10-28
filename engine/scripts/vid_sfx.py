@@ -60,6 +60,9 @@ def sound_design(edl: dict) -> dict | None:
     return out
 
 
+MAX_LEAD_LAG = 1.0            # seconds a clip's sound may start before (J-cut) or outlast (L-cut) its picture
+
+
 def ambient_config(edl: dict) -> dict | None:
     a = (edl.get("style") or {}).get("ambient")
     if not a:
@@ -105,6 +108,10 @@ def validate(edl: dict) -> list[dict]:
         elif isinstance(a, dict):
             if not -30 <= float(a.get("gain_db", 0)) <= 18:
                 add("error", "shot-audio", f"shot {j}: audio.gain_db must be between -30 and 18")
+            for key in ("lead", "lag"):
+                v = a.get(key)
+                if v is not None and not (isinstance(v, (int, float)) and not isinstance(v, bool) and 0 <= v <= MAX_LEAD_LAG):
+                    add("error", "shot-audio", f"shot {j}: audio.{key} must be 0 to {MAX_LEAD_LAG} seconds")
     return out
 
 
@@ -214,10 +221,35 @@ def ambient_segments(edl: dict, windows: list[dict], music_mean_db: float | None
         tempo = None
         if w["speed"] and opts.get("speed_follow"):
             tempo = (w["speed"]["from"] + w["speed"]["to"]) / 2.0
-        segs.append({"j": w["j"], "clip": vl.ffp(w["clip"]), "start": round(w["start0"], 3), "seconds": round(w["seconds"], 3),
-                     "delay": round(w["out_start"], 3), "out_seconds": round(w["out_seconds"], 3), "gain_db": round(gain, 2),
-                     "tempo": tempo})
+        seg = {"j": w["j"], "clip": vl.ffp(w["clip"]), "start": round(w["start0"], 3), "seconds": round(w["seconds"], 3),
+               "delay": round(w["out_start"], 3), "out_seconds": round(w["out_seconds"], 3), "gain_db": round(gain, 2),
+               "tempo": tempo}
+        if tempo is None:
+            seg = apply_lead_lag(seg, opts)
+        segs.append(seg)
     return segs
+
+
+def apply_lead_lag(seg: dict, opts: dict) -> dict:
+    """J-cut / L-cut: the shot's own sound enters `lead` seconds before its picture and/or lingers `lag` seconds after it.
+
+    The lead cannot start before the beginning of the video or of the source clip, so it is cut down to what fits.
+    """
+    try:
+        lead = max(0.0, min(float(opts.get("lead") or 0.0), MAX_LEAD_LAG))
+        lag = max(0.0, min(float(opts.get("lag") or 0.0), MAX_LEAD_LAG))
+    except (TypeError, ValueError):
+        return seg
+    lead = min(lead, seg["delay"], seg["start"])
+    if lead <= 0 and lag <= 0:
+        return seg
+    out = dict(seg)
+    out["delay"] = round(seg["delay"] - lead, 3)
+    out["start"] = round(seg["start"] - lead, 3)
+    out["out_seconds"] = round(seg["out_seconds"] + lead + lag, 3)
+    out["seconds"] = round(seg["seconds"] + lead + lag, 3)
+    out["lead"], out["lag"] = round(lead, 3), round(lag, 3)
+    return out
 
 
 def ambient_lines(segs: list[dict], first_input: int, cfg: dict) -> tuple[list[str], str | None]:

@@ -2,6 +2,48 @@
 
 All notable changes to this project. Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [SemVer](https://semver.org/).
 
+## [0.12.0] - 2026-10-28 (cut and transition craft, phase 4: measurement)
+### Added
+- **Cheap content features, no ML** (`vid_editorial.py`, stored on the score entries): dominant hue and colourfulness, `local_motion` (a subject moving over the background, after cancelling the camera's motion) and `flux` (abrupt change inside the chosen window = a cut or flash in the source).
+- **`content_change(a, b)`** in `vid_cutlogic.py` (0 = same scene, 1 = a different world: picture hash, light, saturation, hue, shot size); used for the calm-dissolve choice. A new cut type `colour-match`: two different places that share a dominant colour.
+- **QA warning `internal-cut`** for a kept shot whose window contains an abrupt change.
+- **Cut-quality metrics** in `engine/tools/eval_quality.py` (`cuts`): reason coverage, variety of cut types and transition families, agreement of directional transitions with the measured movement, risky cuts, hard-cut share; a pure test on synthetic scores.
+- Docs: the honest ML boundary in `docs/ARCHITECTURE.md`, a by-eye "Cuts" checklist in `docs/QA-PROTOCOL.md`.
+
+### Changed
+- Cached scores from before this version are re-measured on the next `score` (they lack the new fields); the measurement adds one small RGB decode per clip.
+
+## [0.11.0] - 2026-10-28 (cut and transition craft, phase 3: cut types in the renderer)
+### Added
+- **Per-transition duration:** EDL `transition_frames` (`{"cut": even frames 2-24}`, default 4). The overlap is split evenly over the two shots, the cut stays centred and the assembled length still equals the project length (checked on random layouts). `lint` errors when a shot cannot hold its overlaps and warns for a key with no transition. The decision engine gives the closing fade and calm dissolves 8 frames, section lifts 6, and shrinks overlaps that short shots cannot hold.
+- **J-cut / L-cut for clip sound:** `shots[i].audio.lead` / `lag` (0-1 s) with `style.ambient`; the lead is limited by the start of the video and of the source clip; retimed shots are untouched; the audio cache key changes only when they are used.
+- **Match on action:** `cuts --align` measures windows of each clip and proposes a `src_start` that continues the previous shot's movement; `--write` stores it.
+- Tests in `test_cut_types.py` (pure timing model, lint, lead/lag, alignment) and one end-to-end render with real media (runs where FFmpeg exists).
+
+### Changed
+- Opt-in only: without `transition_frames`, `lead`/`lag` or `--align` the render is identical to 0.10.0.
+
+## [0.10.0] - 2026-10-28 (cut and transition craft, phase 2: decision engine)
+### Added
+- **`vid_cutlogic.py`:** for every boundary between two shots it names the kind of cut and gives a one-sentence reason from the content: `impact` (the drop), `closing`, `cut-on-action`, `direction-clash`, `graphic-match`, `contrast-cut`, `size-step`, `soften`, `jump-risk`, `section-lift`, `motion-bridge`, `calm-dissolve`, `montage-cut`. Features come from the scores (shot size, camera motion, point of interest, brightness, energy, similarity) and the music sections; the agent's `shot-notes.json` overrides them. Directional slides/wipes follow the measured movement (sign convention pinned by a test).
+- **Transitions chosen under the budget:** highest-priority wishes win, at most the share cap, never two neighbours (except the drop and the ending), each name once, family cap, no banned names.
+- **`cuts EDL --scores DIR [--beats F] [--notes F] [--write] [--overwrite]`** (dry run by default) and **`plan --smart-transitions --scores DIR [--notes F]`**. The previous positional planner stays the default.
+- **EDL `rationale`** (validated by `lint`): `{cut: {type, why}}`; `lint` warns `transition-unmotivated` once rationale is in use and `flash-overuse` for more than one white flash; QA warns `direction-mismatch` and reports a `cut-report` (cut types, transitions with a reason).
+- 24 tests in `test_cutlogic.py` (classification, budget, notes override, lint/QA checks, planner-level run).
+
+### Changed
+- Opt-in only: without `rationale`, `cuts` or `--smart-transitions` nothing changes.
+
+## [0.9.0] - 2026-10-28 (cut and transition craft, phase 1: knowledge)
+### Added
+- **`references/cut-craft.md`:** the catalogue of cuts (hard cut on the beat, cut on action, graphic match, eyeline/direction match, smash cut, cutaway, cross-cut, montage, hold, J-cut, L-cut, jump cut) with when/why/avoid and the engine cue for each, the question to ask at every boundary, the 30- and 180-degree rules, reading time, and the short-form hook.
+- **`references/transition-craft.md`:** what each transition family says, a decision tree, the direction rule, mood guide, and the honest note that today's overlaps are all 4 frames.
+- **`references/footage-reading.md`** and **`shot-notes.json`** (example in `engine/examples/`): how to read the raw clips and record role, subject, camera, movement direction, size, mood and best moment; a cut-plan table before `plan`.
+- `SKILL.md` step 2b and the agent pipeline: every cut and transition gets a type and a written reason; a transition that cannot be justified becomes a hard cut; the final report lists the cut types used. Persian guide section on cuts and transitions.
+
+### Changed
+- Documentation only; the engine behaves exactly as in 0.8.0. The decision engine, new cut types and evaluation follow in 0.10-0.12 (see the plan in `docs/ROADMAP.md`).
+
 ## [0.8.0] - 2026-10-25 (professional-editing arc, advanced items)
 ### Added
 - **Full tempo map + sample-accurate onset (Track C):** `beats` now reports a `tempo_map` (local BPM over the track), `beats_refined` (a variable-spacing grid that follows a speeding-up/slowing-down tempo), and a `drop_refined` time snapped to the exact transient. `plan --follow-tempo` / `need --follow-tempo` place cuts on that grid so late cuts do not drift.

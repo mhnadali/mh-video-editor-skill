@@ -5,7 +5,8 @@ judged by measured deltas on a fixed synthetic corpus rather than by eye.
 It builds a click track with a known tempo and a set of clips, then reports:
   * beats: tempo error and first-beat error against the ground truth, and how tightly the grid lands on the clicks;
   * pick: how diverse the chosen shots are (distinct clips, look-alike neighbours);
-  * plan: the restraint numbers of the resulting EDL (visible effects, transition share, transition variety).
+  * plan: the restraint numbers of the resulting EDL (visible effects, transition share, transition variety);
+  * cuts: how well the cut decisions are founded (reason coverage, variety of cut types, direction agreement, risky cuts).
 
     python engine/tools/eval_quality.py [--bpm 120] [--clips 10] [--json out.json]
 
@@ -90,6 +91,7 @@ def evaluate(bpm: float = 120.0, first: float = 0.5, clips: int = 10, seconds: f
     cands = vid_score.candidates(recs, sc, skip_flagged=False, skip_similar=False)
     pick_metrics = {"library": len(sc), "needed": need}
     edl_metrics = {}
+    cut_m = {}
     if cands and need >= 2:
         if len(cands) >= need and need >= 4:
             intro, outro = 2, 1
@@ -104,7 +106,39 @@ def evaluate(bpm: float = 120.0, first: float = 0.5, clips: int = 10, seconds: f
                       name="eval", music=vl.ffp(music), duration=beats["duration"])
         _au, audit = ve_audit(edl)
         edl_metrics = audit
-    return {"beats": beat_metrics, "pick": pick_metrics, "plan": edl_metrics, "workdir": str(tmp)}
+        cut_m = cut_metrics(edl, sc, beats)
+    return {"beats": beat_metrics, "pick": pick_metrics, "plan": edl_metrics, "cuts": cut_m, "workdir": str(tmp)}
+
+
+def cut_metrics(edl: dict, scores: dict, beats: dict | None = None) -> dict:
+    """Numbers for the quality of the cut decisions on `edl` (not modified): how many have a reason, how varied they
+    are, how often a directional transition agrees with the measured movement, and how many risky cuts remain."""
+    import copy
+    import vid_cutlogic as cl
+    e = copy.deepcopy(edl)
+    e["transitions"] = {}
+    decisions = cl.analyse(e, scores, beats)
+    cl.apply(e, decisions, overwrite=True)
+    rep = cl.cut_report(e)
+    n_cuts = max(len(e["shots"]) - 1, 1)
+    feats = cl.edl_features(e, scores)
+    directional = agree = 0
+    for j, name in ((int(k), v) for k, v in e["transitions"].items()):
+        want = cl.TRANSITION_DIRECTION.get(name)
+        if want in ("left", "right", "up", "down"):
+            directional += 1
+            if cl.direction_name(feats[j - 1]) == want:
+                agree += 1
+    families = {vl.family_of(v) for v in e["transitions"].values()} - {None}
+    types = rep["cut_types"]
+    return {"cuts": n_cuts, "transitions": rep["transitions"],
+            "transitions_with_reason": rep["transitions_with_reason"],
+            "reason_coverage": round(sum(types.values()) / n_cuts, 2),
+            "distinct_cut_types": len(types), "cut_types": types,
+            "distinct_families": len(families),
+            "directional_transitions": directional, "direction_agreement": round(agree / directional, 2) if directional else None,
+            "jump_risks": types.get("jump-risk", 0), "direction_clashes": types.get("direction-clash", 0),
+            "hard_cut_share": round(1 - rep["transitions"] / n_cuts, 2)}
 
 
 def ve_audit(edl: dict) -> tuple[list, dict]:

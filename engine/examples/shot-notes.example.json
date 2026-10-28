@@ -1,0 +1,32 @@
+{
+  "D:/footage/IMG_0412.MOV": {
+    "role": "establishing",
+    "subject": "dunes at sunrise, wide",
+    "camera": "drone-forward",
+    "shot_size": "wide",
+    "motion_dir": "away",
+    "focus": [0.5, 0.45],
+    "mood": "calm",
+    "light": "warm, bright",
+    "best_start": 3.2,
+    "notes": "slow forward drone, very clean, good opening"
+  },
+  "D:/footage/DJI_0087.MP4": {
+    "role": "action",
+    "subject": "quad bike crossing the frame",
+    "camera": "static",
+    "shot_size": "medium",
+    "motion_dir": "left",
+    "mood": "intense",
+    "light": "warm, high contrast",
+    "notes": "bike enters right and leaves left; a slide to the left continues it"
+  },
+  "D:/footage/IMG_0431.MOV": {
+    "role": "detail",
+    "subject": "tyre throwing sand",
+    "shot_size": "detail",
+    "motion_dir": "none",
+    "mood": "intense",
+    "notes": "cutaway between two bike shots"
+  }
+}

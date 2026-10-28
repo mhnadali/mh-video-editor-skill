@@ -176,5 +176,22 @@ class Version(unittest.TestCase):
         self.assertIn("MIT License", (ROOT / "LICENSE").read_text(encoding="utf-8"))
 
 
+class ShotNotes(unittest.TestCase):
+    def test_example_shot_notes_use_the_documented_keys(self):
+        import json
+        keys = {"role", "subject", "camera", "shot_size", "motion_dir", "focus", "mood", "light", "best_start", "notes"}
+        data = json.loads((ROOT / "engine" / "examples" / "shot-notes.example.json").read_text(encoding="utf-8"))
+        self.assertTrue(data)
+        for clip, note in data.items():
+            self.assertLessEqual(set(note), keys, clip)
+            if "shot_size" in note:
+                self.assertIn(note["shot_size"], {"wide", "medium", "close", "detail"})
+            if "motion_dir" in note:
+                self.assertIn(note["motion_dir"], {"left", "right", "up", "down", "toward", "away", "none"})
+        text = (ROOT / "references" / "footage-reading.md").read_text(encoding="utf-8")
+        for k in keys:
+            self.assertIn(f"`{k}`", text, k)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -16,6 +16,7 @@ Exit codes: 0 = success; 1 = a check failed (QA FAIL, lint errors, verify failed
 | [`beats`](#beats) | beat grid, tempo alternatives, downbeats and the drop of a music file |
 | [`need`](#need) | how many clips a beat grid needs |
 | [`plan`](#plan) | beat grid + ordered clip list -> EDL |
+| [`cuts`](#cuts) | name the kind of cut at every boundary and why; propose transitions (dry run unless --write) |
 | [`lint`](#lint) | check an EDL: structure, restraint budget, files, FFmpeg capabilities |
 | [`render`](#render) | render the video (cached parts; --preview for half size) |
 | [`qa`](#qa) | quality gate on a rendered video: defects, loudness, cut timing, effect audit |
@@ -155,7 +156,7 @@ mh_video need [-h] [--duration DURATION] [--period PERIOD] [--intro-shots INTRO_
 Beat grid + ordered clip list -> EDL.
 
 ```
-mh_video plan [-h] --beats BEATS --clips CLIPS --out OUT [--name NAME] [--music MUSIC] [--preset PRESET] [--duration DURATION] [--period PERIOD] [--intro-shots INTRO_SHOTS] [--grade GRADE] [--no-transitions] [--bar-align] [--pacing {beat,energy}] [--follow-tempo] [--scores SCORES]
+mh_video plan [-h] --beats BEATS --clips CLIPS --out OUT [--name NAME] [--music MUSIC] [--preset PRESET] [--duration DURATION] [--period PERIOD] [--intro-shots INTRO_SHOTS] [--grade GRADE] [--no-transitions] [--bar-align] [--pacing {beat,energy}] [--follow-tempo] [--scores SCORES] [--smart-transitions] [--notes NOTES]
 ```
 
 | Argument | Required / default | Meaning |
@@ -175,6 +176,26 @@ mh_video plan [-h] --beats BEATS --clips CLIPS --out OUT [--name NAME] [--music 
 | `--pacing PACING` | one of `beat`, `energy` | energy = hold calm beats, cut fast on strong ones (Track B) |
 | `--follow-tempo` |  | place cuts on the variable-tempo grid (beats_refined), so late cuts do not drift (Track C) |
 | `--scores SCORES` |  | work folder containing scores.json: fill src_start from each clip's best window |
+| `--smart-transitions` |  | choose cuts and transitions from the content of each shot pair, with a written reason (needs --scores) |
+| `--notes NOTES` |  | shot-notes.json written by the agent (overrides measurements; with --smart-transitions) |
+
+## `cuts`
+
+Name the kind of cut at every boundary and why; propose transitions (dry run unless --write).
+
+```
+mh_video cuts [-h] --scores SCORES [--beats BEATS] [--notes NOTES] [--align] [--write] [--overwrite] edl
+```
+
+| Argument | Required / default | Meaning |
+|---|---|---|
+| `edl` | required | the *.edl.json file |
+| `--scores SCORES` | required | work folder with scores.json |
+| `--beats BEATS` |  | beats.json (music sections mark where a transition is motivated) |
+| `--notes NOTES` |  | shot-notes.json (the agent's reading of the footage; wins over measurements) |
+| `--align` |  | also propose src_start values so a shot keeps moving the way the previous one ends (match on action; reads frames) |
+| `--write` |  | store transitions and rationale (and alignments) in the EDL |
+| `--overwrite` |  | with --write: replace existing transitions and rationale |
 
 ## `lint`
 

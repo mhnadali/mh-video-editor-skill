@@ -14,6 +14,7 @@ import vidlib as vl
 
 PAD = 2                      # frames of overlap kept on each side of a transition (xfade lasts 2*PAD frames)
 MIN_SHOT_FRAMES = 8
+MIN_OVERLAP, MAX_OVERLAP = 2, 24     # frames a transition may overlap (EDL `transition_frames`); even numbers only
 
 DEFAULT_STYLE = {
     "grade": "warm-desert",   # preset name or path (engine/presets/*.json)
@@ -113,6 +114,16 @@ def timeline(edl: dict) -> list[int]:
     return bounds
 
 
+def overlap_frames(edl: dict, trans: dict[int, str]) -> dict[int, int]:
+    """Frames each transition overlaps (split evenly over both shots). Default 2*PAD; `transition_frames` overrides it."""
+    raw = edl.get("transition_frames") or {}
+    out = {}
+    for j in trans:
+        v = raw.get(str(j), raw.get(j))
+        out[j] = int(v) if isinstance(v, int) and not isinstance(v, bool) and v % 2 == 0 and MIN_OVERLAP <= v <= MAX_OVERLAP else 2 * PAD
+    return out
+
+
 def drop_boundary(edl: dict, bounds: list[int]) -> int | None:
     """Index j of the cut that carries the drop (None if the EDL has no drop or it is not on a cut)."""
     b = edl.get("beats") or {}
@@ -160,7 +171,7 @@ def structure_errors(edl) -> list[dict]:
 
     if not isinstance(edl, dict):
         return [_issue("error", "structure", f"an EDL is a JSON object, found {type(edl).__name__}")]
-    for key, kind in (("project", dict), ("beats", dict), ("style", dict), ("transitions", dict), ("shots", list), ("texts", list)):
+    for key, kind in (("project", dict), ("beats", dict), ("style", dict), ("transitions", dict), ("transition_frames", dict), ("rationale", dict), ("shots", list), ("texts", list)):
         v = edl.get(key)
         if v is not None and not isinstance(v, kind):
             bad("structure", f"'{key}' must be {'an object' if kind is dict else 'a list'}, found {type(v).__name__}")
@@ -311,6 +322,31 @@ def _lint(edl: dict, check_files: bool = True) -> list[dict]:
         elif v not in vl.ALL_TRANSITIONS:
             out.append(_issue("error", "transition-unknown", f"unknown transition '{v}' at {j}"))
         trans[j] = v
+    tf = edl.get("transition_frames")
+    if isinstance(tf, dict):
+        for k, v in tf.items():
+            try:
+                tj = int(k)
+            except ValueError:
+                out.append(_issue("error", "transition-frames", f"transition_frames key '{k}' is not a boundary number"))
+                continue
+            if not 1 <= tj <= n - 1:
+                out.append(_issue("error", "transition-frames", f"transition_frames {tj} is outside 1..{n - 1}"))
+            if not (isinstance(v, int) and not isinstance(v, bool) and v % 2 == 0 and MIN_OVERLAP <= v <= MAX_OVERLAP):
+                out.append(_issue("error", "transition-frames",
+                                  f"transition_frames {k} must be an even whole number of frames from {MIN_OVERLAP} to {MAX_OVERLAP}, found {v!r}"))
+    rat = edl.get("rationale")
+    if isinstance(rat, dict):
+        for k, v in rat.items():
+            try:
+                rj = int(k)
+            except ValueError:
+                out.append(_issue("error", "rationale-key", f"rationale key '{k}' is not a boundary number"))
+                continue
+            if not 1 <= rj <= n - 1:
+                out.append(_issue("error", "rationale-key", f"rationale {rj} is outside 1..{n - 1}"))
+            if not (isinstance(v, dict) and isinstance(v.get("type"), str) and isinstance(v.get("why"), str) and v["why"].strip()):
+                out.append(_issue("error", "rationale-shape", f"rationale {k} must be {{\"type\": text, \"why\": text}} with a reason"))
     eff = effective_transitions(edl, bounds) if not any(i["code"].startswith("transition-") for i in out) else trans
     cuts = max(n - 1, 1)
     share = len(eff) / cuts
@@ -331,6 +367,25 @@ def _lint(edl: dict, check_files: bool = True) -> list[dict]:
     for f, c in sorted(fam.items()):
         if c > bud["max_family"] and f != "fade":
             out.append(_issue("warn", "transition-family", f"{c} transitions look alike ({f} family, max {bud['max_family']})"))
+    if isinstance(tf, dict) and tf and not any(i["code"] == "transition-frames" for i in out):
+        ovs = overlap_frames(edl, eff)
+        for k in sorted(tf, key=lambda x: int(x)):
+            if int(k) not in eff:
+                out.append(_issue("warn", "transition-frames-unused", f"transition_frames {k} has no transition at that cut"))
+        for j in range(n):
+            ln = bounds[j + 1] - bounds[j]
+            head = ovs.get(j, 0) // 2
+            tail = ovs.get(j + 1, 0) // 2
+            if head + tail > ln - 2:
+                out.append(_issue("error", "transition-frames",
+                                  f"shot {j} is {ln} frames but its transitions overlap {head + tail}; shorten them or lengthen the shot"))
+    if isinstance(rat, dict) and rat:                                      # opt-in: once reasons are used, every transition needs one
+        for j in sorted(eff):
+            if str(j) not in rat:
+                out.append(_issue("warn", "transition-unmotivated",
+                                  f"transition '{eff[j]}' at cut {j} has no reason in `rationale`; give it one or make it a hard cut"))
+    if sum(1 for v in eff.values() if v == "fadewhite") > 1:
+        out.append(_issue("warn", "flash-overuse", "more than one white flash: it only works once, on the drop"))
     # effects
     for k in (edl.get("style") or {}):
         if k not in KNOWN_STYLE_KEYS:
