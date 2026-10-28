@@ -97,14 +97,30 @@ def hue_distance(a: Optional[float], b: Optional[float]) -> Optional[float]:
 
 
 def flux(frames: list[bytes]) -> float:
-    """Largest mean absolute change between consecutive analysis frames (0-255). A very large value inside one clip
-    means the clip itself contains a cut or a flash, which makes it a poor single shot."""
+    """Largest mean absolute change between consecutive analysis frames (0-255); informational. Use `internal_cut` to
+    decide whether the clip cuts or flashes."""
     worst = 0.0
     for a, b in zip(frames, frames[1:]):
         if len(a) != len(b) or not a:
             continue
         worst = max(worst, sum(abs(x - y) for x, y in zip(a, b)) / len(a))
     return round(worst, 2)
+
+
+def internal_cut(frames: list[bytes]) -> bool:
+    """True if one step between consecutive analysis frames is far larger than the others: the clip itself cuts or
+    flashes there. A fast pan changes every step by a similar amount, so it does not trigger this."""
+    diffs = []
+    for a, b in zip(frames, frames[1:]):
+        if len(a) == len(b) and a:
+            diffs.append(sum(abs(x - y) for x, y in zip(a, b)) / len(a))
+    if len(diffs) < 3:
+        return bool(diffs) and max(diffs) >= 90.0              # too few steps to compare: only an extreme jump counts
+    worst = max(diffs)
+    rest = sorted(diffs)
+    rest.remove(worst)
+    median = rest[len(rest) // 2]
+    return worst >= 40.0 and worst >= 2.5 * max(median, 6.0)
 
 
 def local_motion(frames: list[bytes], w: int = GW, h: int = GH) -> float:
@@ -250,7 +266,8 @@ def measure_shot(clip: str, start: float, dur: float, hdr: bool = False) -> dict
     dx, dy, mag = motion_vector(frames)
     cx, cy = saliency_centroid(frames)
     out = {"shot_size": shot_size(mid), "motion_dx": dx, "motion_dy": dy, "motion_mag": mag,
-           "focus_x": cx, "focus_y": cy, "flux": flux(frames), "local_motion": local_motion(frames)}
+           "focus_x": cx, "focus_y": cy, "flux": flux(frames), "internal_cut": internal_cut(frames),
+           "local_motion": local_motion(frames)}
     try:
         hue, sat = dominant_hue(rgb_frames(clip, start, min(max(dur, 0.3), 2.0), hdr=hdr))
         out["hue"], out["colourfulness"] = hue, sat
@@ -261,7 +278,6 @@ def measure_shot(clip: str, start: float, dur: float, hdr: bool = False) -> dict
 
 # --------------------------------------------------------------------------- editorial lint (Track A)
 
-FLUX_CUT = 70.0                       # mean frame-to-frame change (0-255) that means the clip itself cuts or flashes
 PACING_FLAT_CV = 0.08                 # coefficient of variation below which pacing is "monotone"
 SCREEN_DIR_MIN = 1.2                  # analysis-pixels of horizontal motion to count as a clear direction
 
@@ -314,7 +330,7 @@ def editorial_issues(edl: dict, feats: list[dict], bounds: list[int], trans: dic
     # a clip that contains its own cut or flash is a poor single shot
     for j in range(n):
         f = feats[j] if j < len(feats) else {}
-        if f and (f.get("flux") or 0) >= FLUX_CUT:
+        if f and f.get("internal_cut"):
             out.append(_issue("warn", "internal-cut",
                               f"shot {j}: the clip changes abruptly inside the chosen window (a cut or flash in the source); "
                               "pick another start (`src_start`) or another clip"))

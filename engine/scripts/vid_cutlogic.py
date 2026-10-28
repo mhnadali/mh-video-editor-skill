@@ -230,6 +230,9 @@ def classify(a: dict, b: dict, ctx: dict) -> dict:
     if ra is not None and rb is not None and ra != rb:
         return {"type": "size-step", "transition": None, "confidence": 0.6,
                 "why": f"{a['size']} to {b['size']}: a change of shot size is a clean cut that moves the story"}
+    if not any(a.get(k) is not None for k in ("size", "hash", "brightness", "mag")) and             not any(b.get(k) is not None for k in ("size", "hash", "brightness", "mag")):
+        return {"type": "montage-cut", "transition": None, "confidence": 0.1,
+                "why": "no measurements for these shots (run `score`, or describe them in shot-notes.json): a plain rhythm cut"}
     return {"type": "montage-cut", "transition": None, "confidence": 0.4,
             "why": "different shots on the beat; no stronger relation between them (rhythm cut)"}
 
@@ -259,20 +262,34 @@ def _pick_name(want: str, used: dict, fam: dict, bud: dict, direction_hint: Opti
     return None
 
 
-def choose(decisions: list, n_cuts: int, bud: dict) -> list:
+def choose(decisions: list, n_cuts: int, bud: dict, existing: Optional[dict] = None) -> list:
     """Apply the transition budget: the highest-priority wishes win, never more than the share cap, never two
     neighbouring transitions unless one is the drop or the closing, every name within the repeat and family caps."""
-    cap = min(int(n_cuts * bud["max_transition_share"] + 1e-9), n_cuts)
-    cap = min(cap, max(1, int(n_cuts * 0.45))) if n_cuts else 0
-    order = sorted((i for i, d in enumerate(decisions) if d.get("transition")),
-                   key=lambda i: (-PRIORITY.get(decisions[i]["type"], 0), -decisions[i]["confidence"], i))
+    hard_cap = min(int(n_cuts * bud["max_transition_share"] + 1e-9), n_cuts)     # what lint allows
+    cap = min(hard_cap, max(1, int(n_cuts * 0.45))) if n_cuts else 0
     used: dict = {}
     fam: dict = {}
     taken: set = set()
+    kept: set = set()
+    for j, name in (existing or {}).items():            # transitions already in the EDL count against the budget
+        kept.add(j - 1)
+        used[name] = used.get(name, 0) + 1
+        f = vl.family_of(name)
+        if f:
+            fam[f] = fam.get(f, 0) + 1
+    for i, d in enumerate(decisions):
+        if i in kept:
+            d["existing"] = (existing or {}).get(d["j"])
+            d["transition"] = None
+    taken |= kept
+    order = sorted((i for i, d in enumerate(decisions) if d.get("transition")),
+                   key=lambda i: (-PRIORITY.get(decisions[i]["type"], 0), -decisions[i]["confidence"], i))
     for i in order:
         d = decisions[i]
         forced = d["type"] in ("impact", "closing")
-        if len(taken) >= cap and not forced:
+        if d["type"] == "impact":
+            pass                                         # the drop flash is forced by the engine whatever the budget says
+        elif len(taken) >= (hard_cap if forced else cap):
             d["kept_hard"] = True
             continue
         if not forced and ((i - 1) in taken or (i + 1) in taken):
@@ -338,8 +355,11 @@ def edl_features(edl: dict, scores: dict, notes: Optional[dict] = None) -> list:
     return feats
 
 
-def analyse(edl: dict, scores: dict, beats: Optional[dict] = None, notes: Optional[dict] = None) -> list:
-    """Decisions for boundaries 1..n-1 of `edl`: a list of {j, type, why, confidence, transition}."""
+def analyse(edl: dict, scores: dict, beats: Optional[dict] = None, notes: Optional[dict] = None,
+            keep_existing: bool = False) -> list:
+    """Decisions for boundaries 1..n-1 of `edl`: a list of {j, type, why, confidence, transition}.
+
+    keep_existing: transitions already in the EDL stay, count against the budget and are not proposed again."""
     n = len(edl["shots"])
     bounds = ve.timeline(edl)
     fps = ve.project(edl)["fps"]
@@ -353,7 +373,12 @@ def analyse(edl: dict, scores: dict, beats: Optional[dict] = None, notes: Option
         d = classify(feats[j - 1], feats[j], ctx)
         d["j"] = j
         out.append(d)
-    return fit_frames(choose(out, n - 1, ve.budget(edl)), bounds)
+    existing = {}
+    if keep_existing:
+        for k, v in (edl.get("transitions") or {}).items():
+            if str(k).isdigit() and 1 <= int(k) <= n - 1:
+                existing[int(k)] = v
+    return fit_frames(choose(out, n - 1, ve.budget(edl), existing), bounds)
 
 
 def apply(edl: dict, decisions: list, overwrite: bool = False) -> dict:
@@ -459,7 +484,7 @@ def format_table(decisions: list, edl: dict) -> str:
     lines = [f"{'cut':>3}  {'type':14} {'transition':14} {'conf':>4}  why"]
     for d in decisions:
         tr = d.get("transition")
-        label = "-" if not tr else (tr if d.get("frames") in (None, DEFAULT_FRAMES) else f"{tr} {d['frames']}f")
+        label = f"[{d['existing']}]" if d.get("existing") else "-" if not tr else (tr if d.get("frames") in (None, DEFAULT_FRAMES) else f"{tr} {d['frames']}f")
         lines.append(f"{d['j']:>3}  {d['type']:14} {label:14} {d['confidence']:>4.1f}  {d['why']}")
     types: dict = {}
     for d in decisions:

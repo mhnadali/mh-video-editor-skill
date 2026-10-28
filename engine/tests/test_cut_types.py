@@ -84,6 +84,24 @@ class Overlap(unittest.TestCase):
         self.assertIn("transition-frames", [i["code"] for i in ve.lint(e, check_files=False)])
 
 
+class QaWindows(unittest.TestCase):
+    def test_a_long_dip_is_expected_for_its_whole_length(self):
+        import vid_qa
+        e = edl_of(6)
+        e["transitions"] = {"3": "fadeblack"}
+        short = vid_qa.expected_events(e, 30, 6.0)
+        e["transition_frames"] = {"3": 24}                               # 0.8 s dip: 0.4 s each side of the cut
+        long = vid_qa.expected_events(e, 30, 6.0)
+        t = 3.0
+        inside = lambda ev, x: any(a <= x <= b for a, b in ev["black"])
+        self.assertFalse(inside(short, t + 0.38))
+        self.assertTrue(inside(long, t + 0.38) and inside(long, t - 0.38))
+        e["transitions"] = {"3": "fadewhite"}
+        e["transition_frames"] = {"3": 24}
+        wl = vid_qa.expected_events(e, 30, 6.0)
+        self.assertTrue(any(a <= t + 0.38 <= b and a <= t - 0.38 for a, b in wl["white"]))
+
+
 class FitFrames(unittest.TestCase):
     def test_closing_and_dissolves_breathe_but_short_shots_shrink_them(self):
         decisions = [{"j": 1, "type": "soften", "transition": "dissolve"}, {"j": 2, "type": "closing", "transition": "fade"}]
@@ -205,8 +223,14 @@ class ContentFeatures(unittest.TestCase):
     def test_flux_spots_a_cut_inside_a_clip(self):
         dark, bright = bytes([10]) * 100, bytes([240]) * 100
         self.assertEqual(ed.flux([dark, dark, dark]), 0.0)
-        self.assertGreater(ed.flux([dark, dark, bright]), ed.FLUX_CUT)
+        self.assertGreater(ed.flux([dark, dark, bright]), 200)
         self.assertEqual(ed.flux([dark]), 0.0)
+        self.assertFalse(ed.internal_cut([dark] * 6))
+        self.assertTrue(ed.internal_cut([dark, dark, dark, bright, bright, bright]))
+        steady = [bytes([(i * 50 + x * 7) % 256 for x in range(100)]) for i in range(6)]
+        self.assertFalse(ed.internal_cut(steady), "a fast pan changes every step alike: not a cut")
+        self.assertTrue(ed.internal_cut([dark, bright]), "two frames: only an extreme jump counts")
+        self.assertFalse(ed.internal_cut([dark, bytes([60]) * 100]))
 
     def test_local_motion_separates_a_moving_subject_from_a_still_scene(self):
         def scene(bx):
@@ -224,7 +248,7 @@ class ContentFeatures(unittest.TestCase):
 
     def test_internal_cut_warning_and_colour_match(self):
         e = edl_of(4)
-        feats = [{}, {"flux": 120.0}, {}, {}]
+        feats = [{}, {"internal_cut": True}, {}, {}]
         issues = ed.editorial_issues(e, feats, [0, 30, 60, 90, 120], {})
         self.assertEqual([i["code"] for i in issues if i["code"] == "internal-cut"], ["internal-cut"])
         a = {"size": "wide", "hash": 0, "hue": 0.60, "colourfulness": 0.4, "brightness": 100.0, "saturation": 50.0,

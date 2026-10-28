@@ -213,6 +213,8 @@ def cmd_plan(a) -> int:
                         transitions=not a.no_transitions, align_bars=a.bar_align, pacing=a.pacing,
                         follow_tempo=a.follow_tempo)
     if a.smart_transitions:
+        if a.no_transitions:
+            raise vl.EngineError("--smart-transitions and --no-transitions contradict each other; use one")
         if not a.scores:
             raise vl.EngineError("--smart-transitions needs --scores (the work folder with scores.json)")
         import vid_cutlogic
@@ -271,7 +273,7 @@ def cmd_cuts(a) -> int:
     beats = vl.load_json(a.beats) if a.beats else None
     notes = vl.load_json(a.notes) if a.notes else None
     scores = vid_score.load_scores(a.scores)
-    decisions = vid_cutlogic.analyse(edl, scores, beats, notes)
+    decisions = vid_cutlogic.analyse(edl, scores, beats, notes, keep_existing=not a.overwrite)
     print(vid_cutlogic.format_table(decisions, edl))
     proposals = []
     if a.align:
