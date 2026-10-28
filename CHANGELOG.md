@@ -2,6 +2,16 @@
 
 All notable changes to this project. Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [SemVer](https://semver.org/).
 
+## [0.9.0] - 2026-10-28 (cut and transition craft, phase 1: knowledge)
+### Added
+- **`references/cut-craft.md`:** the catalogue of cuts (hard cut on the beat, cut on action, graphic match, eyeline/direction match, smash cut, cutaway, cross-cut, montage, hold, J-cut, L-cut, jump cut) with when/why/avoid and the engine cue for each, the question to ask at every boundary, the 30- and 180-degree rules, reading time, and the short-form hook.
+- **`references/transition-craft.md`:** what each transition family says, a decision tree, the direction rule, mood guide, and the honest note that today's overlaps are all 4 frames.
+- **`references/footage-reading.md`** and **`shot-notes.json`** (example in `engine/examples/`): how to read the raw clips and record role, subject, camera, movement direction, size, mood and best moment; a cut-plan table before `plan`.
+- `SKILL.md` step 2b and the agent pipeline: every cut and transition gets a type and a written reason; a transition that cannot be justified becomes a hard cut; the final report lists the cut types used. Persian guide section on cuts and transitions.
+
+### Changed
+- Documentation only; the engine behaves exactly as in 0.8.0. The decision engine, new cut types and evaluation follow in 0.10-0.12 (see the plan in `docs/ROADMAP.md`).
+
 ## [0.8.0] - 2026-10-25 (professional-editing arc, advanced items)
 ### Added
 - **Full tempo map + sample-accurate onset (Track C):** `beats` now reports a `tempo_map` (local BPM over the track), `beats_refined` (a variable-spacing grid that follows a speeding-up/slowing-down tempo), and a `drop_refined` time snapped to the exact transient. `plan --follow-tempo` / `need --follow-tempo` place cuts on that grid so late cuts do not drift.

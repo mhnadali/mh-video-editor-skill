@@ -29,6 +29,8 @@ weakest kind.
 - **Resolution**: breathe, land the message / CTA.
 
 ## 4. Shot grammar
+The full catalogue of cut types, with when and why, is in `cut-craft.md`; transitions in `transition-craft.md`; reading the raw clips in `footage-reading.md`. A cut is *motivated* when you can name what it does for the viewer; write that reason down.
+
 - Vary shot size: avoid three shots of the same size in a row (the `shot-size-repeat` warning).
 - Establish before you go close in a new location.
 - **Match on action** — cut on motion for an invisible cut; the engine reports cut-on-motion share.

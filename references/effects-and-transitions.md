@@ -17,6 +17,8 @@ Engine effects today: `zoom`, `drop_flash` (white fade + 5-frame RGB split), `en
 Not effects, so outside the budget of three: colour correction and the grade (one look per video), stabilisation, text, whooshes and ambient sound. They still obey restraint: add them when the brief asks, not because they exist.
 
 ## Transition budget
+The budget says *how many*. *Which one and why* is in `transition-craft.md`: a transition must say something a hard cut cannot, and each one gets a written reason.
+
 | Rule | Default |
 |---|---|
 | Share of cut points with a transition | <= 50% (v4: 17 of 38 = 45%); the rest are hard cuts on the beat |
