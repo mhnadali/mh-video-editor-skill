@@ -46,4 +46,6 @@ A slide or wipe has a direction. It should agree with how the content *appears t
 Transitions last 4 frames, centred on the cut so the cut stays on the beat; the renderer asserts the assembled length equals the project length. Do not put a transition between two very short shots (each shot must keep enough picture of its own); the linter checks structure and budget, you check taste with a frame from the contact sheet.
 
 ## Rationale
+The engine can propose these choices with reasons: `cuts` / `plan --smart-transitions` (`references/edl-format.md` documents the `rationale` field). The proposal follows this file's decision tree and the budget; you review it.
+
 For each transition you use, write why: `"3": "slideleft - the quad bike moves right-to-left at the end of A and B continues it"`. If you cannot write that sentence, delete the transition.

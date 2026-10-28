@@ -7,6 +7,14 @@ python "<skill-dir>/engine/scripts/mh_video.py" qa out.mp4 --edl video.edl.json 
 ```
 Exit code 0 = PASS or PASS WITH WARNINGS, 1 = FAIL (`--strict`: 1 on warnings too). Writes `out.qa.json` and `out_check.jpg`. Takes about 3-8 s for a 30 s video.
 
+## Cut reasoning checks (0.10)
+| Check | Level | Meaning |
+|---|---|---|
+| `transition-unmotivated` (lint) | warn | the EDL uses `rationale`, but this transition has no reason |
+| `flash-overuse` (lint) | warn | more than one white flash; it only works once, on the drop |
+| `direction-mismatch` (`qa --scores`) | warn | a left/right slide or wipe moves against the outgoing shot's measured movement |
+| `cut-report` | info | counts of cut types and how many transitions have a reason |
+
 ## What is measured
 - **Picture** (low resolution, one pass): per-frame luma average (YAVG), darkest-10% luma (YLOW), peak (YMAX), chroma averages (U, V), scene-change score, frame-to-frame difference.
 - **Sound** (one pass): integrated loudness (LUFS), loudness range, true peak (dBFS), silences.

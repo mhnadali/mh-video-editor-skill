@@ -212,6 +212,16 @@ def cmd_plan(a) -> int:
                         duration=a.duration, intro_shots=a.intro_shots, period=a.period, grade=a.grade,
                         transitions=not a.no_transitions, align_bars=a.bar_align, pacing=a.pacing,
                         follow_tempo=a.follow_tempo)
+    if a.smart_transitions:
+        if not a.scores:
+            raise vl.EngineError("--smart-transitions needs --scores (the work folder with scores.json)")
+        import vid_cutlogic
+        import vid_score
+        notes = vl.load_json(a.notes) if a.notes else None
+        decisions = vid_cutlogic.analyse(edl, vid_score.load_scores(a.scores), beats, notes)
+        edl["transitions"] = {}
+        vid_cutlogic.apply(edl, decisions, overwrite=True)
+        print(vid_cutlogic.format_table(decisions, edl))
     vl.save_json(a.out, edl)
     print(f"wrote {a.out}: {len(edl['shots'])} shots, {len(edl['transitions'])} transitions")
     return 0
@@ -251,6 +261,24 @@ def cmd_qa(a) -> int:
     if a.strict:
         return 0 if rep["verdict"] == "pass" else 1
     return 1 if rep["verdict"] == "fail" else 0
+
+
+def cmd_cuts(a) -> int:
+    import vid_cutlogic
+    import vid_edl
+    import vid_score
+    edl = vid_edl.load(a.edl)
+    beats = vl.load_json(a.beats) if a.beats else None
+    notes = vl.load_json(a.notes) if a.notes else None
+    decisions = vid_cutlogic.analyse(edl, vid_score.load_scores(a.scores), beats, notes)
+    print(vid_cutlogic.format_table(decisions, edl))
+    if not a.write:
+        print("dry run: nothing written. Review the reasons against the contact sheets; --write stores transitions + rationale.")
+        return 0
+    vid_cutlogic.apply(edl, decisions, overwrite=a.overwrite)
+    vl.save_json(a.edl, edl)
+    print(f"wrote {a.edl}: transitions and rationale ({'replaced' if a.overwrite else 'existing entries kept'})")
+    return 0
 
 
 def cmd_color(a) -> int:
@@ -481,7 +509,17 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--pacing", choices=["beat", "energy"], help="energy = hold calm beats, cut fast on strong ones (Track B)")
     p.add_argument("--follow-tempo", action="store_true", help="place cuts on the variable-tempo grid (beats_refined), so late cuts do not drift (Track C)")
     p.add_argument("--scores", help="work folder containing scores.json: fill src_start from each clip's best window")
+    p.add_argument("--smart-transitions", action="store_true",
+                   help="choose cuts and transitions from the content of each shot pair, with a written reason (needs --scores)")
+    p.add_argument("--notes", help="shot-notes.json written by the agent (overrides measurements; with --smart-transitions)")
     p.set_defaults(fn=cmd_plan)
+    p = sub.add_parser("cuts", help="name the kind of cut at every boundary and why; propose transitions (dry run unless --write)")
+    p.add_argument("edl"); p.add_argument("--scores", required=True, help="work folder with scores.json")
+    p.add_argument("--beats", help="beats.json (music sections mark where a transition is motivated)")
+    p.add_argument("--notes", help="shot-notes.json (the agent's reading of the footage; wins over measurements)")
+    p.add_argument("--write", action="store_true", help="store transitions and rationale in the EDL")
+    p.add_argument("--overwrite", action="store_true", help="with --write: replace existing transitions and rationale")
+    p.set_defaults(fn=cmd_cuts)
     p = sub.add_parser("lint", help="check an EDL: structure, restraint budget, files, FFmpeg capabilities")
     p.add_argument("edl"); p.add_argument("--no-files", action="store_true")
     p.set_defaults(fn=cmd_lint)
