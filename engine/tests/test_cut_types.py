@@ -191,7 +191,8 @@ class RenderLongTransitionsAndJLCuts(unittest.TestCase):
         root.mkdir(parents=True, exist_ok=True)
         clips = [helpers.make_clip(root / f"k{i}.mp4", helpers.SOURCES[i % 4], size="180x320", seconds=3.0,
                                    audio="sine=f=%d" % (200 + 80 * i)) for i in range(6)]
-        music = helpers.click_track(root / "m.wav", seconds=6.0, step_at=None)
+        music = root / "m.wav"
+        helpers.click_track(music, seconds=6.0, step_at=None)
         edl = {"version": 1, "project": {"name": "ct", "width": 180, "height": 320, "fps": 30, "duration": 6.0,
                                          "music": vl.ffp(music)},
                "style": {"grade": "neutral", "zoom": 0, "drop_flash": False, "end_flare": False, "riser": False,
