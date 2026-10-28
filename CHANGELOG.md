@@ -2,6 +2,16 @@
 
 All notable changes to this project. Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [SemVer](https://semver.org/).
 
+## [0.15.0] - 2026-10-28 (story-first selection)
+Why: the first reel's shots were picked by eye from one thumbnail each. Audited with numbers: half of the shots came from the block that held half of the footage, a whole morning of the second day had none, the loudest music carried a plate of food and the calmest picture sat on the quiet music, only 7 of 35 shots had people, the Osmo was 17 % of the edit and 30 % of the library, and the user never saw a plan.
+
+### Added
+- **`story chapters | select | audit`** (`vid_story.py`): draft chapters from the capture timeline; slots from the beat layout with the music's energy; a dynamic programme shares the slots between the chapters so that peak chapters sit on loud music; clips are picked per chapter by a score (quality, energy fit, own sound, people, wanted role, under-used camera, spread over time) with penalties for the same scene, the same topic and one dominant shot size; action slots start on the clip's most moving window; every shot has a reason and two alternates; a teaser hook is optional (the trip's order is the default). Output: `storyboard.json`, `storyboard.md` and a clip list.
+- **`story audit EDL`**: `trip-order`, `chapter-missing`, `chapter-balance`, `camera-underused`, `few-people`, `topic-run`, `energy-mismatch`, `energy-curve`, `short-reading-time`.
+- **`sheets --only RANGE --frames 3`**: start, middle and end of every clip side by side, for a chosen range of the inventory.
+- `score` keeps every measured window (`wins`) and the clip's own sound level (`audio_db`, `sound` percentile); older cached scores are re-measured.
+- `references/story-selection.md`; discovery asks for the story (never for text); the skill and the agent require a storyboard the user approves before `plan` (an autonomous agent stops with `NEEDS_APPROVAL`).
+
 ## [0.14.0] - 2026-10-28 (quality, natural colour, no text, speed: from the first reel's review)
 ### Changed
 - **Final renders are `--quality high` by default** (`standard` | `high` | `max`): the cached parts are encoded at CRF 12 and the assembled video at CRF 16 with the medium preset (was 16 and 18, slow): about 70 Mbps at 4K, while the sources are 43-46 Mbps, audio AAC 256k, so the second encode no longer compounds the first; Lanczos resampling for the cover reframe and the zoom. Previews stay light. 4K presets `reels-9x16-4k` (2160x3840) and `youtube-16x9-4k` for 4K sources (1080p output of 4K footage was judged "very compressed").

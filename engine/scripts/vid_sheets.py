@@ -60,30 +60,54 @@ def _blank(out: Path, size: int) -> None:
             "-frames:v", "1", out])
 
 
+STRIP_POSITIONS = (0.15, 0.5, 0.85)
+
+
 def clip_sheets(records: list[dict], outdir: str | os.PathLike, size: int = 200, cols: int = 8, rows: int = 5,
-                pos: float = 0.4, workers: int | None = None) -> list[str]:
-    """Write sheetNN.jpg files into outdir; returns their paths. Unreadable clips show a dark tile."""
+                pos: float = 0.4, workers: int | None = None, frames: int = 1) -> list[str]:
+    """Write sheetNN.jpg files into outdir; returns their paths. Unreadable clips show a dark tile.
+
+    `frames` = 3 shows the start, the middle and the end of every clip side by side (a strip), so you see what HAPPENS in
+    a clip, not one frame of it; use it on a chosen subset of records (the sheets get 3 times as wide)."""
     out = Path(outdir)
     thumbs = out / "thumbs"
     thumbs.mkdir(parents=True, exist_ok=True)
     font = vl.find_font()
-    idx_files = []
+    positions = [pos] if frames <= 1 else list(STRIP_POSITIONS[:frames]) if frames <= len(STRIP_POSITIONS) else \
+        [(k + 0.5) / frames for k in range(frames)]
 
-    def work(rec):
-        p = thumbs / f"{rec['index']:04d}.jpg"
-        ok = (not rec.get("error")) and _thumb(rec, p, size, pos, font)
+    def work(item):
+        k, rec = item
+        p = thumbs / f"{k:04d}.jpg"
+        ok = not rec.get("error")
+        if ok and len(positions) == 1:
+            ok = _thumb(rec, p, size, positions[0], font)
+        elif ok:
+            parts = []
+            for m, ps in enumerate(positions):
+                q = thumbs / f"{k:04d}_{m}.jpg"
+                if not _thumb(dict(rec, index=rec["index"]) if m == 0 else dict(rec, index=""), q, size, ps, font if m == 0 else None):
+                    ok = False
+                    break
+                parts.append(q)
+            if ok:
+                cmd = [vl.find_ffmpeg()["ffmpeg"], "-v", "error", "-y"]
+                for q in parts:
+                    cmd += ["-i", str(q)]
+                cmd += ["-filter_complex", f"hstack={len(parts)}", "-q:v", "4", "-frames:v", "1", "-update", "1", str(p)]
+                ok = vl.run(cmd, check=False).returncode == 0 and p.is_file()
         if not ok:
             _blank(p, size)
         return p
 
     with ThreadPoolExecutor(workers or vl.cpu_workers(8)) as ex:
-        idx_files = list(ex.map(work, records))
+        list(ex.map(work, enumerate(records)))
     per = cols * rows
     sheets = []
     ff = vl.find_ffmpeg()["ffmpeg"]
-    # thumbnails are numbered by inventory index; build each sheet from its contiguous index range
+    # thumbnails are numbered by position in `records` (== the inventory index when all clips are shown)
     for s in range(0, len(records), per):
-        first = records[s]["index"]
+        first = s
         sheet = out / f"sheet{s // per:02d}.jpg"
         vl.run([ff, "-v", "error", "-y", "-framerate", "1", "-start_number", str(first), "-i", str(thumbs / "%04d.jpg"),
                 "-frames:v", "1", "-vf", f"tile={cols}x{rows}:padding=2:color=black", "-q:v", "3",

@@ -98,9 +98,21 @@ def cmd_sheets(a) -> int:
     import vid_probe
     import vid_sheets
     recs = vid_probe.load_inventory(a.work)
-    sheets = vid_sheets.clip_sheets(recs, Path(a.work) / "sheets", a.size, a.cols, a.rows, a.pos)
+    outdir = Path(a.work) / "sheets"
+    if a.only:
+        import vid_score
+        keep = vid_score.parse_index_spec(a.only)
+        recs = [r for r in recs if r["index"] in keep and r.get("dup_of") is None]
+        outdir = Path(a.work) / "sheets_selected"
+        if not recs:
+            raise vl.EngineError(f"--only {a.only} selects no clip")
+    cols, rows = a.cols, a.rows
+    if a.frames > 1 and (a.cols, a.rows) == (8, 5):
+        cols, rows = max(1, 8 // a.frames), 5                    # strips are wider: fewer per row, same sheet width
+    sheets = vid_sheets.clip_sheets(recs, outdir, a.size, cols, rows, a.pos, frames=a.frames)
     print("\n".join(sheets))
-    print(f"{len(sheets)} sheets, {a.cols * a.rows} clips each; the yellow number is the inventory index")
+    print(f"{len(sheets)} sheets, {cols * rows} clips each; the yellow number is the inventory index"
+          + (f"; each clip shows {a.frames} frames (start, middle, end)" if a.frames > 1 else ""))
     return 0
 
 
@@ -271,6 +283,48 @@ def cmd_qa(a) -> int:
     if a.strict:
         return 0 if rep["verdict"] == "pass" else 1
     return 1 if rep["verdict"] == "fail" else 0
+
+
+def cmd_story(a) -> int:
+    import vid_probe
+    import vid_score
+    import vid_story
+    inv = vid_probe.load_inventory(a.work)
+    scores = vid_score.load_scores(a.work)
+    work = Path(a.work)
+    if a.action == "chapters":
+        cfg = vid_story.propose_chapters(inv, scores, a.gap)
+        out = a.out or str(work / "chapters.json")
+        vl.save_json(out, cfg)
+        print(f"{'#':>2} {'from-to':>9} {'clips':>5} {'min':>5} {'weight':>6} {'energy':>6}  name / cameras")
+        for k, c in enumerate(cfg["chapters"]):
+            print(f"{k:>2} {c['from']:>4}-{c['to']:<4} {c['clips']:>5} {c['minutes']:>5} {c['weight']:>6} {c['energy']:>6}  {c['name']}  {c['devices']}")
+        print(f"wrote {out}: a DRAFT. Look at the footage (sheets --only RANGE --frames 3), then rename the chapters, set the weights "
+              "(what the story needs, not what was filmed), the energy (calm / building / peak) and merge or split blocks.")
+        return 0
+    beats = vl.load_json(a.beats) if getattr(a, "beats", None) else None
+    notes = vl.load_json(a.notes) if getattr(a, "notes", None) else None
+    cfg = vl.load_json(a.chapters)
+    if a.action == "select":
+        if not beats:
+            raise vl.EngineError("story select needs --beats")
+        sb = vid_story.select(inv, scores, beats, cfg, notes, duration=a.duration, body_start=a.body_start, pacing=a.pacing,
+                              intro_shots=a.intro_shots, period=a.period)
+        out = Path(a.out or work / "storyboard.json")
+        vl.save_json(out, sb)
+        out.with_suffix(".md").write_text(vid_story.storyboard_markdown(sb), encoding="utf-8")
+        clips = Path(a.clips) if a.clips else out.with_name(out.stem + "-clips.txt")
+        clips.write_text(vid_story.clip_list_text(sb), encoding="utf-8")
+        print(vid_story.format_storyboard(sb))
+        every = sorted({i for v in sb["shortlist"].values() for i in v})
+        print("shortlist to look at (clips of the storyboard and their best alternates): " + ",".join(str(i) for i in every))
+        print(f"wrote {out}, {out.with_suffix('.md')} and {clips}. Show the storyboard to the user and wait for approval before `plan`.")
+        return 0
+    import vid_edl
+    edl = vid_edl.load(a.edl)
+    rep = vid_story.audit_edl(edl, inv, scores, beats, notes, cfg if a.chapters else None, chronological=not a.free_order)
+    print(vid_story.format_audit(rep))
+    return 0
 
 
 def cmd_cuts(a) -> int:
@@ -490,6 +544,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--work", required=True); p.add_argument("--size", type=int, default=200)
     p.add_argument("--cols", type=int, default=8); p.add_argument("--rows", type=int, default=5)
     p.add_argument("--pos", type=float, default=0.4, help="position in each clip (0-1) of the frame shown")
+    p.add_argument("--only", help="only these inventory indexes, e.g. 100-140,152 (duplicates skipped); written to sheets_selected")
+    p.add_argument("--frames", type=int, default=1, choices=[1, 2, 3, 4],
+                   help="frames per clip: 3 = start, middle and end side by side (see what happens inside a clip)")
     p.set_defaults(fn=cmd_sheets)
     p = sub.add_parser("beats", help="beat grid, tempo alternatives, downbeats and the drop of a music file")
     p.add_argument("audio"); p.add_argument("--out"); p.add_argument("--max-seconds", type=float)
@@ -538,6 +595,21 @@ def build_parser() -> argparse.ArgumentParser:
                    help="choose cuts and transitions from the content of each shot pair, with a written reason (needs --scores)")
     p.add_argument("--notes", help="shot-notes.json written by the agent (overrides measurements; with --smart-transitions)")
     p.set_defaults(fn=cmd_plan)
+    p = sub.add_parser("story", help="story-first selection: chapters, a storyboard to approve, and an audit of an EDL")
+    ssub = p.add_subparsers(dest="action", required=True)
+    q = ssub.add_parser("chapters", help="draft chapters from the capture timeline (name them, weight them, then select)")
+    q.add_argument("--work", required=True); q.add_argument("--out"); q.add_argument("--gap", type=float, default=35.0,
+                   help="minutes of pause that start a new chapter (default 35)")
+    q = ssub.add_parser("select", help="choose the shots for the chapters and the music; writes storyboard.json/.md and a clip list")
+    q.add_argument("--work", required=True); q.add_argument("--beats", required=True); q.add_argument("--chapters", required=True)
+    q.add_argument("--notes", help="shot-notes.json (role, mood, people, topic, shot_size, skip)")
+    q.add_argument("--duration", type=float, required=True); q.add_argument("--body-start", type=float)
+    q.add_argument("--pacing", choices=["beat", "energy"], default="energy"); q.add_argument("--intro-shots", type=int, default=2)
+    q.add_argument("--period", type=float); q.add_argument("--out"); q.add_argument("--clips")
+    q = ssub.add_parser("audit", help="check an EDL against the story principles (chapters, cameras, people, energy vs music, order)")
+    q.add_argument("edl"); q.add_argument("--work", required=True); q.add_argument("--beats"); q.add_argument("--notes")
+    q.add_argument("--chapters"); q.add_argument("--free-order", action="store_true", help="do not require the trip order")
+    p.set_defaults(fn=cmd_story)
     p = sub.add_parser("cuts", help="name the kind of cut at every boundary and why; propose transitions (dry run unless --write)")
     p.add_argument("edl"); p.add_argument("--scores", required=True, help="work folder with scores.json")
     p.add_argument("--beats", help="beats.json (music sections mark where a transition is motivated)")

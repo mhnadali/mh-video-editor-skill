@@ -10,6 +10,7 @@ First, silently: run `doctor`, `probe` the footage folder and `beats` the music 
 2. **Length**: exact seconds, or "match the music"? If the user gives a music file with a length, that length wins.
 3. **Music**: path to the file (the engine never downloads music). No music -> silent edit with natural sound off; ask whether to keep clip sound.
 4. **On-screen text: do NOT ask and do NOT add any.** The default is a video without text. Only if the user themselves asks for a title or captions in their own words, read `references/text-persian.md` and preview it with `text preview` first.
+4b. **The story**: in one sentence, what is the video about and what should the viewer feel (for example "a team beating the desert")? Which moments or people must be in it, and is there a part of the trip that is not worth showing? *Default: the trip in capture order, with the action and the team at the heart of it.* (This is about content, never about text on the video.)
 5. **Mood and pace**: fast and energetic / calm cinematic / mixed. *Default: cut on main beats; hard cuts for roughly half the cut points.*
 6. **Content rules**: what must appear, what must NOT appear (e.g. no food, no faces, no logos), any clip the user already loves.
 7. **Effects**: say the default out loud: "a few effects only (gentle zoom, one flash on the drop, one sun flare at the end) and varied transitions". Ask if they want more or less. Never stack effects on every beat.
