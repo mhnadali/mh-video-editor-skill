@@ -133,14 +133,16 @@ def expected_events(edl: dict | None, fps: float, duration: float) -> dict:
     ev["black"] = [(0.0, p["fade_in"] + 0.15), (max(0.0, duration - p["fade_out"] - 0.15), duration)]
     bounds = ve.timeline(edl)
     trans = ve.effective_transitions(edl, bounds)
+    ovs = ve.overlap_frames(edl, trans)
     for j in range(1, len(bounds) - 1):
         t = bounds[j] / fps
         if j in trans:
             ev["transitions"].append((j, t, trans[j]))
+            half = ovs[j] / 2.0 / fps                          # a longer overlap (transition_frames) dips for longer
             if trans[j] == "fadewhite":
-                ev["white"].append((t - 0.15, t + 0.25))
+                ev["white"].append((t - max(0.15, half + 0.05), t + max(0.25, half + 0.1)))
             if trans[j] == "fadeblack":
-                ev["black"].append((t - 0.15, t + 0.15))
+                ev["black"].append((t - max(0.15, half + 0.05), t + max(0.15, half + 0.05)))
         else:
             ev["cuts"].append((j, t))
     dj = ve.drop_boundary(edl, bounds)

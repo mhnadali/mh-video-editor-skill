@@ -244,6 +244,61 @@ class Cli(unittest.TestCase):
         self.assertTrue(args.smart_transitions)
 
 
+class Regressions(unittest.TestCase):
+    """Bugs found by reading the code of 0.9-0.12 from several angles."""
+
+    def decisions(self, types):
+        return [{"j": i + 1, "type": t, "transition": w, "confidence": 0.7, "why": "x"} for i, (t, w) in enumerate(types)]
+
+    def test_short_video_never_exceeds_the_transition_share_with_drop_and_ending(self):
+        wants = [("motion-bridge", "dir:left"), ("impact", "fadewhite"), ("closing", "fade")]       # 3 cuts: lint allows 1
+        out = cl.choose(self.decisions(wants), 3, dict(ve.DEFAULT_BUDGET))
+        self.assertEqual([d["transition"] for d in out], [None, "fadewhite", None])
+
+    def test_existing_transitions_count_against_the_budget_and_are_not_repeated(self):
+        wants = [("motion-bridge", "dir:left")] * 10
+        existing = {2: "slideleft", 6: "slideright", 9: "circleopen"}
+        out = cl.choose(self.decisions(wants), 10, dict(ve.DEFAULT_BUDGET), existing)
+        names = [d["transition"] for d in out if d["transition"]]
+        self.assertLessEqual(len(names) + len(existing), 5)
+        self.assertFalse(set(names) & set(existing.values()), "no name used twice")
+        for j in existing:
+            self.assertIsNone(out[j - 1]["transition"])
+            self.assertEqual(out[j - 1]["existing"], existing[j])
+        idx = sorted([d["j"] for d in out if d["transition"]] + list(existing))
+        self.assertTrue(all(b - a >= 2 for a, b in zip(idx, idx[1:])), idx)
+
+    def test_cuts_keeps_what_is_already_in_the_edl_unless_overwrite(self):
+        edl = make_edl(10)
+        edl["transitions"] = {"2": "slideleft", "5": "pixelize"}
+        sc = make_scores(n=10)
+        dec = cl.analyse(edl, sc, keep_existing=True)
+        cl.apply(edl, dec)
+        self.assertEqual(edl["transitions"]["2"], "slideleft")
+        self.assertEqual(edl["transitions"]["5"], "pixelize")
+        issues = ve.lint(edl, check_files=False)
+        self.assertFalse([i for i in issues if i["code"] in ("transition-share", "transition-repeat", "transition-family")], issues)
+        self.assertIn("[slideleft]", cl.format_table(dec, edl))
+
+    def test_no_measurements_says_so(self):
+        d = cl.classify(feat(size=None, hash=None, brightness=None, mag=None, saturation=None, energy=None),
+                        feat(size=None, hash=None, brightness=None, mag=None, saturation=None, energy=None), {})
+        self.assertIn("no measurements", d["why"])
+
+    def test_smart_transitions_cannot_be_combined_with_no_transitions(self):
+        import mh_video
+        import helpers
+        root = helpers.tmpdir()
+        import json
+        (root / "b.json").write_text(json.dumps({"duration": 28.235, "period": 0.6505, "t0": 0.6, "drop_beat": 22, "file": None}))
+        (root / "c.txt").write_text(chr(10).join(f"clip{i}.mp4" for i in range(39)))
+        a = mh_video.build_parser().parse_args(["plan", "--beats", str(root / "b.json"), "--clips", str(root / "c.txt"),
+                                                "--out", str(root / "o.json"), "--scores", str(root), "--smart-transitions",
+                                                "--no-transitions", "--duration", "28.235", "--period", "0.6505"])
+        with self.assertRaises(vl.EngineError):
+            mh_video.cmd_plan(a)
+
+
 class SmartPlan(unittest.TestCase):
     """The real planner layout (39 shots, a drop): smart transitions stay inside the budget and keep the drop flash."""
 

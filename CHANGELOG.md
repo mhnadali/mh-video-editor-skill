@@ -2,6 +2,19 @@
 
 All notable changes to this project. Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [SemVer](https://semver.org/).
 
+## [0.12.1] - 2026-10-28 (debug pass over 0.9-0.12)
+### Fixed
+- **QA false errors on long dips:** the black/white frames of a `fadeblack` / `fadewhite` with a longer `transition_frames` were reported as unplanned (the expected window was fixed at +-0.15 s); it now follows the real overlap.
+- **Budget:** in a short video the drop flash and the closing fade together could exceed the 50 % transition share (lint `transition-share`); the closing fade now respects the ceiling. Transitions already in the EDL are kept by `cuts`, count against the budget and their names are not proposed again (`--overwrite` replaces them); the table shows them as `[name]`.
+- **`internal-cut` false positives:** a fixed threshold would flag fast pans and whip pans as cuts. Detection is now relative (one step far larger than the rest); `flux` stays as information.
+- `plan --smart-transitions --no-transitions` contradicted itself silently; it is now an error.
+- With no measurements at all, a boundary no longer claims "no stronger relation"; it says there are no measurements.
+- Regression tests for each of these (`Regressions`, `QaWindows`, `internal_cut`).
+
+### Known limits (unchanged, documented)
+- A shot whose `src_start` is closer to the start of its clip than half of the overlap reads from the beginning of the clip, so the content at the cut can be shifted by up to the overlap (at most 0.4 s).
+- `cuts --align` reads the motion of the whole clip window, not the exact last frames of the previous shot.
+
 ## [0.12.0] - 2026-10-28 (cut and transition craft, phase 4: measurement)
 ### Added
 - **Cheap content features, no ML** (`vid_editorial.py`, stored on the score entries): dominant hue and colourfulness, `local_motion` (a subject moving over the background, after cancelling the camera's motion) and `flux` (abrupt change inside the chosen window = a cut or flash in the source).
