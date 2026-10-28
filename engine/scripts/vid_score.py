@@ -196,7 +196,7 @@ def score_inventory(records: list[dict], workers: int | None = None, limit: int 
     def one(r):
         nonlocal done, reused
         old = previous.get(r["path"])
-        if old and old.get("size") == r.get("size") and old.get("mtime") == r.get("mtime") and "quality" in old:
+        if old and old.get("size") == r.get("size") and old.get("mtime") == r.get("mtime") and "quality" in old                 and "flux" in old:                                  # entries from before the editorial/colour fields are re-measured
             out = dict(old)
             out["index"] = r["index"]
             reused += 1

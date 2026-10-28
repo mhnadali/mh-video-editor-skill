@@ -51,6 +51,11 @@ signal is a reviewable number on a score entry or in the EDL, never a hidden dec
 (faces, objects, speech) would need ML, which the project excludes (standard library + FFmpeg, no downloads); the
 heuristic signals (motion saliency, edge/entropy, colour) are enough for reframe, interest and continuity.
 
+### Cut decisions (0.9-0.12)
+`vid_cutlogic.py` turns the per-shot measurements into a named cut and a one-sentence reason for every boundary, then applies the transition budget. Inputs: `score.json` fields (shot size, camera motion, point of interest, brightness, saturation, energy, picture hash, dominant hue, `local_motion`, `flux`), the music sections of `beats.json`, and the agent's `shot-notes.json`, which overrides the measurements. Output: `transitions`, `transition_frames` and `rationale` in the EDL (`cuts --write`, `plan --smart-transitions`), plus optional `src_start` alignments (`cuts --align`). The rules are explicit and tested; nothing is learned.
+
+**The honest ML boundary.** Pure-Python measurements can say *how big, how fast, which way, how bright, what colour, how alike*. They cannot say *who*, *what is happening*, *whether the gesture is finished* or *whether a face is turned toward the camera*. Those judgements are the agent's: it looks at the frames, writes `shot-notes.json`, and its notes win. Adding a vision model would break the zero-dependency, offline promise (see `SECURITY.md`), so it is deliberately not part of the engine.
+
 ## Per-shot part chain (order matters)
 ```
 tonemap (HLG -> SDR) -> retime (setpts / minterpolate / fps) -> reframe (cover | blur-fill | fit, focus)

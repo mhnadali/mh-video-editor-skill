@@ -13,6 +13,7 @@ Exit code 0 = PASS or PASS WITH WARNINGS, 1 = FAIL (`--strict`: 1 on warnings to
 | `transition-unmotivated` (lint) | warn | the EDL uses `rationale`, but this transition has no reason |
 | `flash-overuse` (lint) | warn | more than one white flash; it only works once, on the drop |
 | `direction-mismatch` (`qa --scores`) | warn | a left/right slide or wipe moves against the outgoing shot's measured movement |
+| `internal-cut` (`qa --scores`) | warn | the chosen clip window contains an abrupt change (a cut or flash in the source) |
 | `cut-report` | info | counts of cut types and how many transitions have a reason |
 
 ## What is measured

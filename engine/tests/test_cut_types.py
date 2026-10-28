@@ -6,6 +6,7 @@ from unittest import mock
 
 import helpers  # noqa: F401
 import vid_cutlogic as cl
+import vid_editorial as ed
 import vid_edl as ve
 import vid_render as vr
 import vid_sfx as sfx
@@ -178,6 +179,61 @@ class Alignment(unittest.TestCase):
                   1: {"index": 1, "path": "c1.mp4", "motion_dx": -3.0, "motion_dy": 0.0, "motion_mag": 3.0}}
         with mock.patch.object(vl, "probe", return_value={"duration": 6.0}):
             self.assertEqual(cl.align_edl(e, scores, measure=lambda *a: [(1.5, -3.0, 0.0, 3.0)]), [])
+
+
+def solid(rgb, w=16, h=9):
+    return bytes(rgb) * (w * h)
+
+
+class ContentFeatures(unittest.TestCase):
+    def test_dominant_hue_follows_the_colourful_pixels(self):
+        hue, sat = ed.dominant_hue([solid((20, 60, 220))])
+        self.assertAlmostEqual(hue, 0.64, delta=0.03)                         # blue
+        hue_r, _ = ed.dominant_hue([solid((220, 30, 20))])
+        self.assertLess(ed.hue_distance(hue_r, 0.0), 0.03)                    # red sits at 0 on the circle
+        self.assertIsNone(ed.dominant_hue([solid((128, 128, 128))])[0])       # grey has no hue
+        self.assertEqual(ed.dominant_hue([]), (None, 0.0))
+        # a grey road under a small patch of blue sky still reads as blue
+        mixed = bytearray(solid((120, 120, 120)))
+        mixed[:3 * 30] = solid((20, 60, 220), 10, 3)
+        self.assertAlmostEqual(ed.dominant_hue([bytes(mixed)])[0], 0.64, delta=0.03)
+
+    def test_hue_distance_is_circular(self):
+        self.assertAlmostEqual(ed.hue_distance(0.95, 0.05), 0.1, places=3)
+        self.assertIsNone(ed.hue_distance(None, 0.3))
+
+    def test_flux_spots_a_cut_inside_a_clip(self):
+        dark, bright = bytes([10]) * 100, bytes([240]) * 100
+        self.assertEqual(ed.flux([dark, dark, dark]), 0.0)
+        self.assertGreater(ed.flux([dark, dark, bright]), ed.FLUX_CUT)
+        self.assertEqual(ed.flux([dark]), 0.0)
+
+    def test_local_motion_separates_a_moving_subject_from_a_still_scene(self):
+        def scene(bx):
+            buf = bytearray(ed.GW * ed.GH)
+            for i in range(len(buf)):
+                buf[i] = (i * 37) % 200                                     # fixed texture
+            for y in range(8, 16):
+                for x in range(bx, bx + 6):
+                    buf[y * ed.GW + x] = 255
+            return bytes(buf)
+        still = ed.local_motion([scene(10), scene(10), scene(10)])
+        moving = ed.local_motion([scene(10), scene(20), scene(30)])
+        self.assertLess(still, 0.05)
+        self.assertGreater(moving, still)
+
+    def test_internal_cut_warning_and_colour_match(self):
+        e = edl_of(4)
+        feats = [{}, {"flux": 120.0}, {}, {}]
+        issues = ed.editorial_issues(e, feats, [0, 30, 60, 90, 120], {})
+        self.assertEqual([i["code"] for i in issues if i["code"] == "internal-cut"], ["internal-cut"])
+        a = {"size": "wide", "hash": 0, "hue": 0.60, "colourfulness": 0.4, "brightness": 100.0, "saturation": 50.0,
+             "dx": 0.0, "dy": 0.0, "mag": 0.0, "focus": None, "energy": 50.0}
+        b = dict(a, hash=(1 << 40) - 1, hue=0.62, size="medium")
+        d = cl.classify(a, b, {})
+        self.assertEqual(d["type"], "colour-match")
+        self.assertGreater(cl.content_change(a, dict(b, hue=0.1, brightness=200.0)), cl.content_change(a, b))
+        self.assertEqual(cl.content_change(a, dict(a)), 0.0)
 
 
 @unittest.skipUnless(helpers.ffmpeg_available(), "ffmpeg not installed")

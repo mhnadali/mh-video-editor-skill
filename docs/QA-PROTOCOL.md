@@ -17,6 +17,14 @@ The automated gate (`qa`) measures the picture and the sound, but it cannot hear
 - [ ] Music is present and not clipping; whooshes (if any) duck the music, they do not bury it.
 - [ ] Reported integrated loudness is within a couple of LU of the target (`qa` prints it).
 
+## Cuts (real footage, by eye)
+- [ ] Run `cuts EDL --scores work --beats work/beats.json` and read every reason against the contact sheet. Is each stated reason true? Note the ones that are wrong; fix them with `shot-notes.json`.
+- [ ] No cut looks like a jump cut (two near-identical shots); no slide or wipe runs against the movement in the picture.
+- [ ] The cuts on action really do continue the movement; open the frames on both sides of three of them.
+- [ ] Every transition has a reason you would defend; the video does not feel decorated.
+- [ ] Longer dissolves (`transition_frames` 8-12) feel calm, not mushy; J/L-cuts (`audio.lead` / `lag`) are audible and not distracting (you must listen).
+- [ ] `qa` shows no `internal-cut` for a shot you kept.
+
 ## Hardware paths
 - [ ] `render EDL --encoder auto` selects the expected encoder (VideoToolbox on a Mac, NVENC on an NVIDIA PC) and the file plays everywhere.
 - [ ] `render EDL --encoder libx264` still works (the universal fallback).

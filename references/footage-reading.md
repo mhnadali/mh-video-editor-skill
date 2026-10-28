@@ -21,10 +21,10 @@ Look at the contact sheet frames (and extract a few more frames for a clip you a
 | **Best moment** (second in the clip, if not `best_start`) | `src_start` on the one good moment |
 | **Risks** (blurry, shaky, overexposed, contains an internal cut, people who did not consent to be shown) | Reject or fix before planning |
 
-Measured energy is motion, not excitement; a calm clip can be the emotional peak. Your reading wins over a heuristic.
+The engine also measures the dominant colour (`hue`), whether a subject moves over the background (`local_motion`) and whether the clip contains a cut or flash (`flux`); they appear in `scores.json` and drive `colour-match`, `internal-cut` and the dissolve choice. Measured energy is motion, not excitement; a calm clip can be the emotional peak. Your reading wins over a heuristic.
 
 ## `shot-notes.json`
-Save next to `video-brief.md`. A JSON object keyed by the clip's path (as in the clip list) or by inventory index. Every field is optional; write only what you actually saw.
+Save next to `video-brief.md`. A JSON object keyed by the clip's path (as in the clip list). Every field is optional; write only what you actually saw.
 
 ```json
 {

@@ -2,6 +2,17 @@
 
 All notable changes to this project. Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [SemVer](https://semver.org/).
 
+## [0.12.0] - 2026-10-28 (cut and transition craft, phase 4: measurement)
+### Added
+- **Cheap content features, no ML** (`vid_editorial.py`, stored on the score entries): dominant hue and colourfulness, `local_motion` (a subject moving over the background, after cancelling the camera's motion) and `flux` (abrupt change inside the chosen window = a cut or flash in the source).
+- **`content_change(a, b)`** in `vid_cutlogic.py` (0 = same scene, 1 = a different world: picture hash, light, saturation, hue, shot size); used for the calm-dissolve choice. A new cut type `colour-match`: two different places that share a dominant colour.
+- **QA warning `internal-cut`** for a kept shot whose window contains an abrupt change.
+- **Cut-quality metrics** in `engine/tools/eval_quality.py` (`cuts`): reason coverage, variety of cut types and transition families, agreement of directional transitions with the measured movement, risky cuts, hard-cut share; a pure test on synthetic scores.
+- Docs: the honest ML boundary in `docs/ARCHITECTURE.md`, a by-eye "Cuts" checklist in `docs/QA-PROTOCOL.md`.
+
+### Changed
+- Cached scores from before this version are re-measured on the next `score` (they lack the new fields); the measurement adds one small RGB decode per clip.
+
 ## [0.11.0] - 2026-10-28 (cut and transition craft, phase 3: cut types in the renderer)
 ### Added
 - **Per-transition duration:** EDL `transition_frames` (`{"cut": even frames 2-24}`, default 4). The overlap is split evenly over the two shots, the cut stays centred and the assembled length still equals the project length (checked on random layouts). `lint` errors when a shot cannot hold its overlaps and warns for a key with no transition. The decision engine gives the closing fade and calm dissolves 8 frames, section lifts 6, and shrinks overlaps that short shots cannot hold.

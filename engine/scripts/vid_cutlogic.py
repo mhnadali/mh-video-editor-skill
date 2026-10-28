@@ -39,7 +39,7 @@ SECTION_LIFT = ["circleopen", "radial", "diagbl", "vertopen", "horzopen"]
 SOFT = ["dissolve", "fade", "fadegrays"]
 
 PRIORITY = {"impact": 100, "closing": 90, "section-lift": 70, "motion-bridge": 60, "soften": 50, "calm-dissolve": 40}
-HARD_TYPES = {"cut-on-action", "graphic-match", "contrast-cut", "size-step", "montage-cut", "direction-clash",
+HARD_TYPES = {"cut-on-action", "graphic-match", "colour-match", "contrast-cut", "size-step", "montage-cut", "direction-clash",
               "jump-risk"}
 ALL_TYPES = set(PRIORITY) | HARD_TYPES
 # Overlap in frames (even; the cut stays centred on the beat). Calm passings of time breathe longer than energetic ones.
@@ -66,7 +66,8 @@ def shot_features(score: Optional[dict], note: Optional[dict]) -> dict:
     s, n = score or {}, note or {}
     f = {"size": n.get("shot_size") or s.get("shot_size"), "hash": s.get("hash"),
          "brightness": s.get("brightness"), "saturation": s.get("saturation"), "role": n.get("role"),
-         "mood": n.get("mood")}
+         "mood": n.get("mood"), "hue": s.get("hue"), "colourfulness": s.get("colourfulness"),
+         "flux": s.get("flux"), "local_motion": s.get("local_motion")}
     dx, dy, mag = s.get("motion_dx"), s.get("motion_dy"), s.get("motion_mag")
     md = n.get("motion_dir")
     if md == "left":
@@ -111,6 +112,29 @@ def vertical(f: dict) -> int:
 
 def moving(f: dict) -> bool:
     return (f.get("mag") or 0) >= MOVE_MIN
+
+
+def content_change(a: dict, b: dict) -> float:
+    """How different two shots are, 0 (the same scene) to 1 (a different world): picture hash, light, saturation, hue and
+    shot size, each contributing what it can. Unknown parts are left out, not guessed."""
+    parts = []
+    ham = hamming(a.get("hash"), b.get("hash"))
+    if ham is not None:
+        parts.append((0.35, min(ham / 32.0, 1.0)))
+    if a.get("brightness") is not None and b.get("brightness") is not None:
+        parts.append((0.2, min(abs(a["brightness"] - b["brightness"]) / 128.0, 1.0)))
+    if a.get("saturation") is not None and b.get("saturation") is not None:
+        parts.append((0.15, min(abs(a["saturation"] - b["saturation"]) / 100.0, 1.0)))
+    hd = None
+    if a.get("hue") is not None and b.get("hue") is not None:
+        d = abs(a["hue"] - b["hue"]) % 1.0
+        hd = min(d, 1.0 - d)
+        parts.append((0.2, hd / 0.5))
+    ra, rb = SIZE_RANK.get(a.get("size")), SIZE_RANK.get(b.get("size"))
+    if ra is not None and rb is not None:
+        parts.append((0.1, abs(ra - rb) / 3.0))
+    total = sum(w for w, _ in parts)
+    return round(sum(w * v for w, v in parts) / total, 3) if total else 0.0
 
 
 def hamming(a, b) -> Optional[int]:
@@ -175,6 +199,12 @@ def classify(a: dict, b: dict, ctx: dict) -> dict:
         if dist <= FOCUS_NEAR and (ra is None or rb is None or abs(ra - rb) <= 1):
             return {"type": "graphic-match", "transition": None, "confidence": 0.6,
                     "why": "the point of interest sits in the same place in both shots: the eye does not have to move"}
+    ha, hb = a.get("hue"), b.get("hue")
+    if ha is not None and hb is not None and ham is not None and ham > SAME_SCENE_BITS and             (a.get("colourfulness") or 0) >= 0.15 and (b.get("colourfulness") or 0) >= 0.15:
+        hd = abs(ha - hb) % 1.0
+        if min(hd, 1.0 - hd) <= 0.06:
+            return {"type": "colour-match", "transition": None, "confidence": 0.5,
+                    "why": "two different places share the same dominant colour: the colour carries the eye across the cut"}
     ba, bb = a.get("brightness"), b.get("brightness")
     jump = (ba is not None and bb is not None and abs(ba - bb) >= BRIGHT_JUMP) or \
            (ea is not None and eb is not None and abs(ea - eb) >= ENERGY_JUMP)
@@ -193,7 +223,7 @@ def classify(a: dict, b: dict, ctx: dict) -> dict:
     if moving(a) and d and not moving(b):
         return {"type": "motion-bridge", "transition": "dir:" + d, "confidence": 0.6,
                 "why": f"shot A ends moving {d} on screen: a slide {d} carries its momentum into the next shot"}
-    if both_calm and ba is not None and bb is not None and (abs(ba - bb) >= 25 or abs((a.get("saturation") or 0) - (b.get("saturation") or 0)) >= 25):
+    if both_calm and ba is not None and bb is not None and (content_change(a, b) >= 0.3 or abs(ba - bb) >= 25 or abs((a.get("saturation") or 0) - (b.get("saturation") or 0)) >= 25):
         return {"type": "calm-dissolve", "transition": "dissolve", "confidence": 0.5,
                 "why": "calm shots with a change of light or colour: a dissolve eases the change"}
     ra, rb = SIZE_RANK.get(a.get("size")), SIZE_RANK.get(b.get("size"))
