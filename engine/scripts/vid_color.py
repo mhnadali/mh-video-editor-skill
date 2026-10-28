@@ -88,16 +88,45 @@ def yuv_means_to_rgb(y: float, u: float, v: float) -> tuple[float, float, float]
 IDENTITY_CORRECTION = {"ev": 0.0, "black": 0.0, "white": 1.0, "gamma": 1.0, "gain": [1.0, 1.0, 1.0]}
 
 
+SECONDARY_KEYS = {"center", "width", "sat", "shift", "gain"}
+
+
+def validate_secondary(adjustments) -> list:
+    """Validate a hue-qualified secondary list: [{center, width, sat, shift, gain}, ...]."""
+    if not isinstance(adjustments, list):
+        raise vl.EngineError("correct.secondary must be a list of hue adjustments")
+    for adj in adjustments:
+        if not isinstance(adj, dict):
+            raise vl.EngineError("each correct.secondary entry must be an object")
+        for k in adj:
+            if k not in SECONDARY_KEYS:
+                raise vl.EngineError(f"correct.secondary.{k} is unknown (center, width, sat, shift, gain)")
+        if not 0 <= adj.get("center", 0) <= 360:
+            raise vl.EngineError("correct.secondary.center must be a hue 0..360")
+        if not 5 <= adj.get("width", 40) <= 180:
+            raise vl.EngineError("correct.secondary.width must be 5..180 degrees")
+        if not 0.0 <= adj.get("sat", 1.0) <= 2.0:
+            raise vl.EngineError("correct.secondary.sat must be 0..2")
+        if not -60 <= adj.get("shift", 0.0) <= 60:
+            raise vl.EngineError("correct.secondary.shift must be -60..60 degrees")
+        if not 0.5 <= adj.get("gain", 1.0) <= 2.0:
+            raise vl.EngineError("correct.secondary.gain must be 0.5..2.0")
+    return adjustments
+
+
 def normalize_correction(c: dict | None) -> dict | None:
     """Validate a correction dict (missing keys default to identity). None/empty -> None."""
     if not c:
         return None
     if not isinstance(c, dict):
         raise vl.EngineError("correct must be an object with ev, black, white, gamma, gain")
+    secondary = c.get("secondary")
     out = {k: (list(v) if isinstance(v, list) else v) for k, v in IDENTITY_CORRECTION.items()}
     for k, v in c.items():
+        if k == "secondary":
+            continue
         if k not in out:
-            raise vl.EngineError(f"correct.{k} is unknown (known: ev, black, white, gamma, gain)")
+            raise vl.EngineError(f"correct.{k} is unknown (known: ev, black, white, gamma, gain, secondary)")
         out[k] = v
     if not -3.0 <= out["ev"] <= 3.0:
         raise vl.EngineError("correct.ev must be between -3 and 3 stops")
@@ -112,7 +141,9 @@ def normalize_correction(c: dict | None) -> dict | None:
     g = out["gain"]
     if not (isinstance(g, list) and len(g) == 3 and all(0.5 <= x <= 2.0 for x in g)):
         raise vl.EngineError("correct.gain must be three numbers between 0.5 and 2.0")
-    if is_identity_correction(out):
+    if secondary is not None:
+        out["secondary"] = validate_secondary(secondary)
+    if is_identity_correction(out) and not secondary:
         return None
     return out
 
@@ -192,6 +223,18 @@ LOOKS: dict[str, dict] = {
     "bw-contrast": {
         "description": "Black and white with strong contrast and a slight red filter.",
         "mono": {"weights": [0.45, 0.45, 0.10]}, "contrast": 0.30, "pivot": 0.45, "shoulder": 0.90, "vignette": 0.30},
+    "muted-matte": {
+        "description": "Understated editorial matte: softened colour, lifted blacks, rolled highlights, gentle contrast.",
+        "contrast": 0.10, "pivot": 0.46, "saturation": 0.82, "black": 0.03, "white": 0.97, "shoulder": 0.82,
+        "shadows": [-0.004, 0.002, 0.008]},
+    "cool-blue": {
+        "description": "Cool blue cast for night, water and urban scenes: teal-leaning shadows, crisp contrast.",
+        "contrast": 0.14, "pivot": 0.45, "saturation": 0.98, "shoulder": 0.88,
+        "cdl": {"slope": [0.96, 1.00, 1.06]}, "shadows": [-0.010, 0.000, 0.020]},
+    "warm-film": {
+        "description": "Warm film emulation: amber highlights, protected blacks, soft shoulder, a hint of vignette.",
+        "contrast": 0.14, "pivot": 0.45, "saturation": 1.04, "black": 0.02, "shoulder": 0.84,
+        "cdl": {"slope": [1.05, 1.00, 0.93]}, "highlights": [0.020, 0.008, -0.012], "vignette": 0.12},
 }
 LOOK_KEYS = {"description", "exposure", "contrast", "pivot", "black", "white", "shoulder", "cdl", "shadows", "mids",
              "highlights", "saturation", "vibrance", "hue_shifts", "mono", "vignette"}
@@ -455,6 +498,37 @@ def ensure_look_lut(look: dict, strength: float, lut_dir: str | os.PathLike) -> 
     return str(path)
 
 
+def secondary_function(adjustments: list):
+    """-> f(r, g, b): hue-qualified secondary correction. Each adjustment only touches pixels near its hue (sky,
+    foliage, skin), changing saturation, hue and brightness there. Baked into a small LUT like a look."""
+    def f(r: float, g: float, b: float):
+        c = [r, g, b]
+        for adj in adjustments:
+            h, s, v = rgb_to_hsv(*c)
+            w = _hue_weight(h, adj.get("center", 0.0), adj.get("width", 40.0)) * min(1.0, s * 3.0)
+            if w > 0:
+                nh = h + adj.get("shift", 0.0) * w
+                ns = clamp(s * (1.0 + (adj.get("sat", 1.0) - 1.0) * w))
+                nv = clamp(v * (1.0 + (adj.get("gain", 1.0) - 1.0) * w))
+                c = list(hsv_to_rgb(nh, ns, nv))
+        return tuple(clamp(x) for x in c)
+    return f
+
+
+def ensure_secondary_lut(adjustments: list, lut_dir: str | os.PathLike) -> str | None:
+    """Bake a hue-qualified secondary correction into <lut_dir>/sec_<hash>.cube (cached); None if empty."""
+    if not adjustments:
+        return None
+    key = hashlib.sha1(json.dumps(adjustments, sort_keys=True).encode()).hexdigest()[:12]
+    path = Path(lut_dir) / f"sec_{key}.cube"
+    with _LUT_LOCKS_GUARD:
+        lock = _LUT_LOCKS.setdefault(str(path), threading.Lock())
+    with lock:
+        if not path.is_file():
+            write_cube(path, build_lut(secondary_function(adjustments)), LUT_SIZE, title="mh-secondary")
+    return str(path)
+
+
 def vignette_filter(amount: float) -> str:
     """Soft corner darkening. FFmpeg's `angle` is the lens angle: a LARGER angle darkens MORE (measured on 9:16: pi/7 leaves
     the corners at 62% of the centre, pi/3 at 0%). amount 0.2 = pi/7 (the gentle vignette of the approved Maranjab v4)."""
@@ -472,11 +546,17 @@ def grade_chain(grade, correct, lut_dir: str | os.PathLike) -> list[str]:
     """
     chain: list[str] = []
     corr = curves_filter(correct)
+    nc = normalize_correction(correct)
+    secondary = nc.get("secondary") if nc else None
     look = None
     strength, user_lut, user_strength = 1.0, None, 1.0
     if grade:
         look, strength, user_lut, user_strength = resolve_look(grade)
     luts: list[str] = []
+    if secondary:                                                     # hue-qualified secondary correction, before the look
+        sp = ensure_secondary_lut(secondary, lut_dir)
+        if sp:
+            luts.append(f"lut3d=file='{vl.filter_escape_path(sp)}':interp=tetrahedral")
     if look:
         p = ensure_look_lut(look, strength, lut_dir)
         if p:
@@ -523,9 +603,11 @@ def measure_window(path: str, start: float, dur: float = 1.0, hdr: bool = False,
             return None
         vals: dict[str, list[float]] = {k: [] for k in _STAT_KEYS}
         for line in s.read_text(errors="replace").splitlines():
-            m = re.match(r"lavfi\.signalstats\.(\w+)=([\d.eE+-]+)", line.strip())
+            m = re.match(r"lavfi\.signalstats\.(\w+)=(\S+)", line.strip())
             if m and m.group(1) in vals:
-                vals[m.group(1)].append(float(m.group(2)))
+                v = vl.parse_float(m.group(2))
+                if v is not None:
+                    vals[m.group(1)].append(v)
     if not vals["YAVG"]:
         return None
     return {k: sum(v) / len(v) for k, v in vals.items() if v}
@@ -584,10 +666,15 @@ def propose_correction(stats: dict, strength: float = 0.8, target_mean: float | 
             full, why = [(g / r) * (mr / mg), 1.0, (g / b) * (mb / mg)], "towards the median colour balance of all shots"
         elif wb == "gray-world":
             full, limit, strength_wb, why = [g / r, 1.0, g / b], 0.15, 0.5, "gray-world (assumes the average colour is neutral)"
+        elif wb == "skin":
+            # skin-tone aware: neutralise a cast but never cool the image below neutral, so warm skin stays warm
+            full, limit, strength_wb, why = [g / r, 1.0, g / b], 0.12, 0.5, "skin-tone protected (warms only, never cools)"
         if full:
             cast = max(abs(full[0] - 1.0), abs(full[2] - 1.0))
             if cast > 0.03:
                 gain = [clamp(1.0 + strength_wb * strength * (x - 1.0), 1.0 - limit, 1.0 + limit) for x in full]
+                if wb == "skin":
+                    gain = [max(gain[0], 1.0), gain[1], min(gain[2], 1.0)]   # protect warmth: allow warming, block cooling
                 reasons.append(f"white balance gains R {gain[0]:.2f} / B {gain[2]:.2f} ({why}, difference {cast:.0%})")
     corr = {"ev": round(ev, 3), "black": round(black, 3), "white": round(white, 3), "gamma": 1.0,
             "gain": [round(x, 3) for x in gain]}

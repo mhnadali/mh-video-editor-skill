@@ -151,7 +151,7 @@ class Coverage(unittest.TestCase):
             for i, tok in enumerate(cmd[:-1]):
                 if tok in ("-vf", "-af", "-lavfi", "-filter_complex"):
                     graphs.append(cmd[i + 1])
-                elif tok == "-/filter_complex":
+                elif tok in ("-/filter_complex", "-filter_complex_script"):   # FFmpeg 7+ and the pre-7 form
                     graphs.append(Path(cmd[i + 1]).read_text(encoding="utf-8"))
         graphs += [p.read_text(encoding="utf-8") for p in (work / "w").glob("audio_*.txt")]
         for cmd in seen:                                                     # "-i color=...,filter" style sources

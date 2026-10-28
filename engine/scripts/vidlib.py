@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import glob
 import json
+import math
 import os
 import re
 import shutil
@@ -275,6 +276,20 @@ def even(n: float) -> int:
     return max(2, int(round(n / 2.0)) * 2)
 
 
+def parse_float(text: str) -> float | None:
+    """Parse one FFmpeg metadata value, returning None for anything non-finite or unparseable.
+
+    `blurdetect` (and a few other filters) print `-nan` for a frame with no edges at all on some FFmpeg builds
+    (seen on 6.x). `float('-nan')` is actually a NaN, but a regex that captured only the leading `-` used to raise
+    `ValueError`. Every metadata reader goes through here so one odd token never crashes a whole analysis pass.
+    """
+    try:
+        v = float(text)
+    except (TypeError, ValueError):
+        return None
+    return v if math.isfinite(v) else None
+
+
 def load_json(path: str | os.PathLike) -> dict:
     try:
         with open(path, encoding="utf-8") as fh:
@@ -337,6 +352,14 @@ def load_preset(name: str) -> dict:
     if not p.suffix:
         p = PRESET_DIR / f"{name}.json"
     return load_json(p)
+
+
+def engine_version() -> str:
+    """The skill version (from the repository's VERSION file), or '0' if it cannot be read."""
+    try:
+        return (ENGINE_DIR.parent / "VERSION").read_text(encoding="utf-8").strip()
+    except OSError:
+        return "0"
 
 
 def say(msg: str) -> None:

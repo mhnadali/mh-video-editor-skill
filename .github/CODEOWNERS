@@ -1,0 +1,6 @@
+# Code owners. The maintainer reviews changes to the engine, the skill contract and CI by default.
+*                       @mhnadali
+/engine/scripts/        @mhnadali
+/engine/tests/          @mhnadali
+/.github/workflows/     @mhnadali
+SKILL.md                @mhnadali

@@ -1,0 +1,38 @@
+name: release
+
+# Cuts a GitHub Release when a version tag is pushed. The body is the matching section of CHANGELOG.md.
+# Tag the commit after the test suite is green on main: `git tag v0.6.0 && git push origin v0.6.0`.
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check the tag matches VERSION
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          file="$(cat VERSION)"
+          test "$tag" = "$file" || { echo "tag $tag does not match VERSION $file"; exit 1; }
+      - name: Extract the changelog section
+        run: |
+          python - "$GITHUB_REF_NAME" > RELEASE_NOTES.md <<'PY'
+          import re, sys
+          tag = sys.argv[1].lstrip("v")
+          text = open("CHANGELOG.md", encoding="utf-8").read()
+          m = re.search(r"^## \[" + re.escape(tag) + r"\].*?(?=^## \[|\Z)", text, re.S | re.M)
+          print(m.group(0).strip() if m else f"Release {tag}")
+          PY
+      - name: Create the release
+        uses: softprops/action-gh-release@v2
+        with:
+          body_path: RELEASE_NOTES.md
+          name: ${{ github.ref_name }}

@@ -121,7 +121,7 @@ mh_video pick [-h] --work WORK --count COUNT --out OUT [--intro-shots INTRO_SHOT
 Beat grid, tempo alternatives, downbeats and the drop of a music file.
 
 ```
-mh_video beats [-h] [--out OUT] [--max-seconds MAX_SECONDS] audio
+mh_video beats [-h] [--out OUT] [--max-seconds MAX_SECONDS] [--bpm BPM] [--beats-per-bar BEATS_PER_BAR] [--first-beat FIRST_BEAT] audio
 ```
 
 | Argument | Required / default | Meaning |
@@ -129,13 +129,16 @@ mh_video beats [-h] [--out OUT] [--max-seconds MAX_SECONDS] audio
 | `audio` | required | music file (mp3, wav, m4a ...) |
 | `--out OUT` |  | write the full analysis to this beats.json |
 | `--max-seconds MAX_SECONDS` |  | analyse only the first N seconds |
+| `--bpm BPM` |  | force this tempo instead of estimating it (tap-tempo / known BPM) |
+| `--beats-per-bar BEATS_PER_BAR` | default `4` | beats per bar for the downbeat grid (4 = common time, 3 = waltz) |
+| `--first-beat FIRST_BEAT` |  | time in seconds of the first beat (overrides the detected phase) |
 
 ## `need`
 
 How many clips a beat grid needs.
 
 ```
-mh_video need [-h] [--duration DURATION] [--period PERIOD] [--intro-shots INTRO_SHOTS] beats
+mh_video need [-h] [--duration DURATION] [--period PERIOD] [--intro-shots INTRO_SHOTS] [--pacing {beat,energy}] [--follow-tempo] beats
 ```
 
 | Argument | Required / default | Meaning |
@@ -144,13 +147,15 @@ mh_video need [-h] [--duration DURATION] [--period PERIOD] [--intro-shots INTRO_
 | `--duration DURATION` |  | override the video duration in seconds |
 | `--period PERIOD` |  | override the beat period in seconds |
 | `--intro-shots INTRO_SHOTS` | default `2` | shots before the beat grid starts |
+| `--pacing PACING` | one of `beat`, `energy` | energy = hold calm beats, cut fast on strong ones (Track B) |
+| `--follow-tempo` |  | place cuts on the variable-tempo grid (beats_refined), so late cuts do not drift (Track C) |
 
 ## `plan`
 
 Beat grid + ordered clip list -> EDL.
 
 ```
-mh_video plan [-h] --beats BEATS --clips CLIPS --out OUT [--name NAME] [--music MUSIC] [--preset PRESET] [--duration DURATION] [--period PERIOD] [--intro-shots INTRO_SHOTS] [--grade GRADE] [--no-transitions] [--bar-align] [--scores SCORES]
+mh_video plan [-h] --beats BEATS --clips CLIPS --out OUT [--name NAME] [--music MUSIC] [--preset PRESET] [--duration DURATION] [--period PERIOD] [--intro-shots INTRO_SHOTS] [--grade GRADE] [--no-transitions] [--bar-align] [--pacing {beat,energy}] [--follow-tempo] [--scores SCORES]
 ```
 
 | Argument | Required / default | Meaning |
@@ -167,6 +172,8 @@ mh_video plan [-h] --beats BEATS --clips CLIPS --out OUT [--name NAME] [--music 
 | `--grade GRADE` | default `warm-desert` | look or preset name |
 | `--no-transitions` |  | hard cuts only |
 | `--bar-align` |  | start the body on a downbeat (needs bar_phase in beats.json) |
+| `--pacing PACING` | one of `beat`, `energy` | energy = hold calm beats, cut fast on strong ones (Track B) |
+| `--follow-tempo` |  | place cuts on the variable-tempo grid (beats_refined), so late cuts do not drift (Track C) |
 | `--scores SCORES` |  | work folder containing scores.json: fill src_start from each clip's best window |
 
 ## `lint`
@@ -187,7 +194,7 @@ mh_video lint [-h] [--no-files] edl
 Render the video (cached parts; --preview for half size).
 
 ```
-mh_video render [-h] [--out OUT] [--preview] [--encoder {auto,libx264,nvenc}] [--work WORK] [--no-cache] [--force] [--workers WORKERS] [--hwdecode {auto,none}] [--qa] [--format FORMAT] [--all-formats] edl
+mh_video render [-h] [--out OUT] [--preview] [--encoder {auto,libx264,nvenc,videotoolbox,qsv}] [--work WORK] [--no-cache] [--force] [--workers WORKERS] [--hwdecode {auto,none}] [--qa] [--format FORMAT] [--all-formats] [--delivery {reels,tiktok,shorts,stories,youtube,square}] [--target-size-mb TARGET_SIZE_MB] [--bitrate BITRATE] [--manifest] [--bundle] [--json JSON] edl
 ```
 
 | Argument | Required / default | Meaning |
@@ -195,7 +202,7 @@ mh_video render [-h] [--out OUT] [--preview] [--encoder {auto,libx264,nvenc}] [-
 | `edl` | required | the *.edl.json file |
 | `--out OUT` |  | output video (default: next to the EDL) |
 | `--preview` |  | render at half size |
-| `--encoder ENCODER` | default `auto`; one of `auto`, `libx264`, `nvenc` | video encoder (auto uses NVENC when available) |
+| `--encoder ENCODER` | default `auto`; one of `auto`, `libx264`, `nvenc`, `videotoolbox`, `qsv` | video encoder (auto uses NVENC when available) |
 | `--work WORK` |  | work folder for the cached parts |
 | `--no-cache` |  | re-render every part |
 | `--force` |  | render despite lint errors |
@@ -204,6 +211,12 @@ mh_video render [-h] [--out OUT] [--preview] [--encoder {auto,libx264,nvenc}] [-
 | `--qa` |  | run the quality gate on the result (final renders) |
 | `--format FORMAT` |  | render in another format preset, e.g. youtube-16x9 or square-1x1 (reframed with blur-fill) |
 | `--all-formats` |  | render reels-9x16, youtube-16x9 and square-1x1 from the same EDL |
+| `--delivery DELIVERY` | one of `reels`, `tiktok`, `shorts`, `stories`, `youtube`, `square` | platform delivery preset (sets the format, loudness target and container for that platform) |
+| `--target-size-mb TARGET_SIZE_MB` |  | aim for this output file size in MB (two-pass bitrate on libx264) |
+| `--bitrate BITRATE` |  | target video bitrate in kbit/s (overrides constant-quality encoding) |
+| `--manifest` |  | write a reproducibility manifest (versions, hashes) next to the output |
+| `--bundle` |  | zip the EDL, brief, beats and scores for hand-off (no media) |
+| `--json JSON` |  | also write the render result (paths, sizes, verdict) to this JSON file |
 
 ## `qa`
 
@@ -301,7 +314,7 @@ mh_video color analyze [-h] [--at AT] [--strength STRENGTH] [--scope SCOPE] sour
 Propose per-shot corrections for an EDL (dry run unless --write).
 
 ```
-mh_video color plan [-h] [--match {exposure,reference,none}] [--reference REFERENCE] [--strength STRENGTH] [--wb {off,median,gray-world}] [--only ONLY] [--write] [--overwrite] edl
+mh_video color plan [-h] [--match {exposure,reference,none}] [--reference REFERENCE] [--strength STRENGTH] [--wb {off,median,gray-world,skin}] [--only ONLY] [--write] [--overwrite] edl
 ```
 
 | Argument | Required / default | Meaning |
@@ -310,7 +323,7 @@ mh_video color plan [-h] [--match {exposure,reference,none}] [--reference REFERE
 | `--match MATCH` | default `exposure`; one of `exposure`, `reference`, `none` | how shots are matched to each other |
 | `--reference REFERENCE` |  | shot number to match (with --match reference) |
 | `--strength STRENGTH` | default `0.8` | how strongly the look is applied, 0-1 |
-| `--wb WB` | one of `off`, `median`, `gray-world` | white balance: median (default with --match exposure), gray-world (opt-in), off |
+| `--wb WB` | one of `off`, `median`, `gray-world`, `skin` | white balance: median (default with --match exposure), gray-world (opt-in), skin (protects warmth), off |
 | `--only ONLY` |  | shot numbers, e.g. 0-5,9 |
 | `--write` |  | store the proposal in the EDL (otherwise only print it) |
 | `--overwrite` |  | replace corrections that are already in the EDL |
@@ -320,7 +333,7 @@ mh_video color plan [-h] [--match {exposure,reference,none}] [--reference REFERE
 On-screen text (Persian right-to-left supported).
 
 ```
-mh_video text [-h] {fonts,import-srt,preview} ...
+mh_video text [-h] {fonts,templates,import-srt,preview} ...
 ```
 
 ### `text fonts`
@@ -329,6 +342,14 @@ List the fonts the engine will use.
 
 ```
 mh_video text fonts [-h]
+```
+
+### `text templates`
+
+List the reusable text templates (title-card, lower-third, caption ...).
+
+```
+mh_video text templates [-h]
 ```
 
 ### `text import-srt`

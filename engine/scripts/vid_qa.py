@@ -21,6 +21,7 @@ import tempfile
 from pathlib import Path
 
 import vid_edl as ve
+import vid_editorial
 import vid_sheets
 import vidlib as vl
 
@@ -45,6 +46,8 @@ EXPOSURE_JUMP = 45.0            # luma levels between the 4 frames before and af
 EXPOSURE_JUMP_SHARE = 0.30      # warn when more than this share of the cuts jump that much (v4 had 14%, median jump 12)
 CUT_SCENE_MIN = 0.12            # scene score a hard cut normally exceeds
 CUT_OFFSET_FRAMES = 2
+QUALITY_ERROR_PENALTY = 22      # a single quality score 0-100: each error / warning subtracts this much
+QUALITY_WARN_PENALTY = 6
 
 
 def level_rank(level: str) -> int:
@@ -57,9 +60,11 @@ def _read_series(path: Path, prefix: str, keys: tuple[str, ...]) -> dict[str, li
     out: dict[str, list[float]] = {k: [] for k in keys}
     if path.exists():
         for line in path.read_text(errors="replace").splitlines():
-            m = re.match(rf"{re.escape(prefix)}(\w+)=([\d.eE+-]+)", line.strip())
+            m = re.match(rf"{re.escape(prefix)}(\w+)=(\S+)", line.strip())
             if m and m.group(1) in out:
-                out[m.group(1)].append(float(m.group(2)))
+                v = vl.parse_float(m.group(2))
+                if v is not None:
+                    out[m.group(1)].append(v)
     return out
 
 
@@ -450,6 +455,18 @@ def audit_edit(edl: dict, scores: dict | None = None) -> tuple[list[dict], dict]
             if adj:
                 out.append({"id": "similar-neighbours", "level": "warn", "msg": f"{len(adj)} neighbouring shots show the same scene (shots {', '.join(str(i - 1) + '-' + str(i) for i in adj[:6])})"})
             out.append({"id": "clip-quality", "level": "info", "msg": f"mean quality of used clips {audit['mean_quality_used']} (library {audit['mean_quality_library']})"})
+        # editorial audit (Track A/F): shot-size variety, jump cuts, screen direction, pacing
+        feats = []
+        for sh in edl["shots"]:
+            key = os.path.normcase(os.path.abspath(sh["clip"]))
+            feats.append(next((s for s in scores.values() if s.get("path") and os.path.normcase(os.path.abspath(s["path"])) == key), {}))
+        if any(f.get("shot_size") for f in feats):
+            out += vid_editorial.editorial_issues(edl, feats, bounds, trans)
+            ed = vid_editorial.summarize_editorial(edl, feats, bounds, trans)
+            audit.update(ed)
+            out.append({"id": "editorial", "level": "info",
+                        "msg": f"shot sizes {ed['shot_size_mix']}, {ed['distinct_shot_sizes']} distinct; "
+                               f"{ed['cut_on_motion_share']:.0%} of hard cuts land on motion"})
     return out, audit
 
 
@@ -489,9 +506,11 @@ def run_qa(video: str | os.PathLike, edl_path: str | os.PathLike | None = None, 
         checks += audit_checks
     worst = max((level_rank(c["level"]) for c in checks), default=0)
     verdict = {0: "pass", 1: "pass", 2: "warn", 3: "fail"}[worst]
-    report = {"verdict": verdict, "video": vl.ffp(video), "edl": vl.ffp(edl_path) if edl_path else None,
+    counts = {lv: sum(1 for c in checks if c["level"] == lv) for lv in ("ok", "info", "warn", "error")}
+    quality_score = max(0, min(100, 100 - QUALITY_ERROR_PENALTY * counts["error"] - QUALITY_WARN_PENALTY * counts["warn"]))
+    report = {"verdict": verdict, "quality_score": quality_score, "video": vl.ffp(video), "edl": vl.ffp(edl_path) if edl_path else None,
               "duration": info["duration"], "frames": pic["frames"], "size_mb": round(info["size"] / 1e6, 1),
-              "counts": {lv: sum(1 for c in checks if c["level"] == lv) for lv in ("ok", "info", "warn", "error")},
+              "counts": counts,
               "checks": checks, "audio": aud, "cuts": cut_stats, "edit_audit": audit_data}
     if sheet:
         report["sheet"] = vid_sheets.video_sheet(video, sheet)
@@ -503,7 +522,7 @@ ICON = {"ok": "ok  ", "info": "info", "warn": "WARN", "error": "FAIL"}
 
 def format_report(rep: dict) -> str:
     head = {"pass": "PASS", "warn": "PASS WITH WARNINGS", "fail": "FAIL"}[rep["verdict"]]
-    lines = [f"QA {head}: {Path(rep['video']).name}  ({rep['duration']:.2f}s, {rep['frames']} frames, {rep['size_mb']} MB)"]
+    lines = [f"QA {head} (quality {rep.get('quality_score', '?')}/100): {Path(rep['video']).name}  ({rep['duration']:.2f}s, {rep['frames']} frames, {rep['size_mb']} MB)"]
     for lvl in ("error", "warn", "info", "ok"):
         for c in rep["checks"]:
             if c["level"] == lvl:

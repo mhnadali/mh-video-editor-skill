@@ -2,6 +2,53 @@
 
 All notable changes to this project. Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [SemVer](https://semver.org/).
 
+## [0.8.0] - 2026-10-25 (professional-editing arc, advanced items)
+### Added
+- **Full tempo map + sample-accurate onset (Track C):** `beats` now reports a `tempo_map` (local BPM over the track), `beats_refined` (a variable-spacing grid that follows a speeding-up/slowing-down tempo), and a `drop_refined` time snapped to the exact transient. `plan --follow-tempo` / `need --follow-tempo` place cuts on that grid so late cuts do not drift.
+- **Hue-qualified secondary colour correction (Track D):** an EDL `correct.secondary` list ([{center, width, sat, shift, gain}, ...]) adjusts only pixels near a hue (sky / foliage / skin), baked into a small cached LUT and applied before the look.
+- **Single quality score (Track F):** every QA report carries `quality_score` (0-100): 100 minus 22 per error and 6 per warning. Shown in the report header and documented in `references/qa-gate.md`.
+- Tests for the tempo map, onset refinement, tempo-following layout, secondary correction and the quality score.
+
+### Changed
+- `beats.json` gains `tempo_map`, `beats_refined`, `drop_refined`; `correct` accepts a `secondary` list; all additive and opt-in.
+
+### Fixed
+- **Windows CI (root cause).** The failure was Windows-only and confined to the PowerShell installer smoke test; every test module and the full suite pass on Windows, and all FFmpeg versions pass on Linux. Three issues were fixed: (1) `install.ps1` used `$ErrorActionPreference = "Stop"` together with a brittle multi-path `New-Item`/`Resolve-Path`, so a single non-terminating condition became a terminating error - the installer is now non-throwing (separate `New-Item` calls, forward-slash paths, `-ErrorAction SilentlyContinue`, and the `doctor` check guarded like `install.sh`'s `|| true` with `$global:LASTEXITCODE = 0`); (2) `install.ps1` resolved the target home from PowerShell's `$HOME`, which does not follow a later `$env:USERPROFILE` change, so it now resolves `$env:USERPROFILE` first (falling back to `$HOME`); (3) the workflow smoke step assigned `$HOME = $fake`, but `$HOME` is read-only in PowerShell and the assignment threw - the step now overrides only `$env:USERPROFILE`. Confirmed by reproducing the full suite locally on FFmpeg 6.1.1, 8.1.3 and 9.0.2 (all green) and by splitting the Windows job into per-step diagnostic jobs that isolated the failure to the `$HOME` assignment.
+
+## [0.7.0] - 2026-10-25 (tracks A-G: editorial intelligence, music structure, colour, reframing)
+### Added
+- **Editorial measurement (Track A, `vid_editorial.py`):** per-shot shot-size classification (wide/medium/close), camera-motion direction and magnitude (block matching on small grayscale frames), and a saliency centroid - pure Python over FFmpeg-decoded frames, no ML. `score` now stores these as cached fields.
+- **Editorial lint + QA (Tracks A/F):** the QA gate (with `--scores`) now reports an `editorial` summary (shot-size mix, cut-on-motion share) and warns on `shot-size-repeat`, `jump-cut`, `screen-direction` (180-degree line) and `pacing-flat`.
+- **Story structure / pacing (Track B):** `plan --pacing energy` and `need --pacing energy` hold calm beats and cut fast on strong ones (energy-aware shot lengths) instead of one-shot-per-beat.
+- **Music structure (Track C):** `beats` now reports per-beat strength and musical `sections` (intro/build/drop/outro) from a sustained-loudness segmentation; `beats --bpm/--first-beat/--beats-per-bar` already added in 0.6. A music-selection tool (`engine/tools/pick_music.py`) ranks the user's own track library by fit to a brief (never downloads).
+- **Colour (Track D):** `color plan --wb skin` - skin-tone-aware white balance that neutralises a cast but never cools the image, protecting warm skin.
+- **Auto-reframe (Track E):** `focus: "auto"` on a shot keeps the subject in frame when reframing to another aspect, using the measured saliency centroid instead of a blind centre-crop.
+- **The craft rubric (Track G):** `references/editorial-rubric.md` - the agent's decision framework (Murch's priorities, shot grammar, pacing, music structure, correct-then-grade). Architecture notes the engine-measures / agent-judges split and the honest ML boundary.
+- Tests: `engine/tests/test_editorial.py` (measurement, editorial lint, sections, pacing, skin WB, music selection, auto-reframe).
+
+### Changed
+- `score.json` entries gain editorial fields (shot_size, motion_dx/dy/mag, focus_x/y); older entries are re-measured on the next `score`.
+- All new behaviour is opt-in via a flag or an EDL field; the default pipeline is unchanged.
+
+## [0.6.0] - 2026-10-25 (phases 6-12: trust, onboarding, delivery, intelligence, reproducibility)
+### Added
+- **Delivery and export layer** (`vid_deliver.py`, `references/delivery.md`): `render --delivery reels|tiktok|shorts|stories|youtube|square` sets the format, the -14 LUFS loudness target and the container (`yuv420p`, `+faststart`); `--target-size-mb N` targets a file size with two-pass libx264 (VBR on hardware encoders), treated as an upper bound; `--bitrate KBPS` sets the video bitrate directly. A `delivery_check` (size, aspect, container) is added to the render result.
+- **Reproducibility and automation:** `render --manifest` writes `<output>.manifest.json` (engine and FFmpeg versions, SHA-256 of the EDL and output, input sizes/mtimes); `render --bundle` zips the EDL and its sidecars (brief, beats, scores, clip list) for hand-off, never media; `render --json FILE` writes the render result for scripting.
+- **Multi-track music (music sections):** `project.music` may be a list of user-supplied tracks, concatenated (equal-loudness) before the usual fades, ducking and two-pass master.
+- **Broader hardware support:** hardware H.264 encoder detection for NVENC, VideoToolbox, QSV and VAAPI; `--encoder auto` picks a working one (else libx264) and `doctor` lists them; `--encoder` now accepts `videotoolbox` and `qsv`. A cache garbage-collector (`vid_deliver.gc_cache`) and per-shot progress logging for long renders.
+- **Editing intelligence:** `beats --bpm` (tap-tempo / known tempo), `--first-beat` and `--beats-per-bar` (non-4/4 downbeat grids); an evaluation harness (`engine/tools/eval_quality.py`) that reports beat error, pick diversity and restraint on a fixed synthetic corpus so changes are judged by numbers.
+- **New capabilities:** reusable text templates (`text templates`: title-card, lower-third, caption, subtitle, location, end-card) usable via a `template` field on a text; three more looks (muted-matte, cool-blue, warm-film).
+- **Onboarding & distribution:** a zero-footage sample project (`engine/tools/make_sample.py`), a README quickstart, `docs/ROADMAP.md` (the file the README already linked to), `SUPPORT.md` (platform / FFmpeg support matrix), `docs/QA-PROTOCOL.md` (real-footage manual QA), `docs/RELEASING.md`, and a tag-driven release workflow.
+- **CI / trust:** the full render suite now runs on macOS as well as Linux and Windows; a CodeQL workflow; Dependabot for Actions; issue and pull-request templates; `CODEOWNERS`.
+- **Security:** a no-network invariant test (static import scan plus a runtime socket guard) codifies the promise that the engine never reaches the network.
+
+### Fixed
+- **Cross-FFmpeg robustness:** `blurdetect` prints `-nan` for a textureless frame on FFmpeg 6.x, which crashed the metadata parser (`could not convert string to float: '-'`); all metadata readers now parse through `vidlib.parse_float`, which drops non-finite tokens. Found by running the suite on FFmpeg 6.1.1 (the project was developed on 9.0.2).
+
+### Changed
+- `project.music` accepts a list as well as a string; the linter and manifest handle both.
+- Test count grew with suites for delivery, reproducibility, security, the sample project and the evaluation harness.
+
 ## [0.5.0] - 2026-10-16 (phase 5: hardening, documentation, Persian guide, CI)
 ### Added
 - **Malformed-input handling.** `vid_edl.structure_errors` validates shape, types and magnitudes first; `lint` never raises (a safety net reports `edl-malformed`); `render --force` cannot bypass structural errors; the CLI prints one-line errors with exit code 2 (130 on Ctrl-C) and shows the traceback only with `MH_DEBUG=1`. A seeded mutation fuzzer (`test_fuzz.py`) damages valid EDLs thousands of times.
