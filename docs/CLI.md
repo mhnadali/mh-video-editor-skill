@@ -148,7 +148,7 @@ mh_video beats [-h] [--out OUT] [--max-seconds MAX_SECONDS] [--bpm BPM] [--beats
 Story-first selection: chapters, a storyboard to approve, and an audit of an EDL.
 
 ```
-mh_video story [-h] {chapters,exclusions,select,audit} ...
+mh_video story [-h] {chapters,refine,exclusions,select,audit} ...
 ```
 
 ### `story chapters`
@@ -164,6 +164,21 @@ mh_video story chapters [-h] --work WORK [--out OUT] [--gap GAP]
 | `--work WORK` | required | work folder (inventory, scores, sheets, beats live here) |
 | `--out OUT` |  | output file |
 | `--gap GAP` | default `35.0` | minutes of pause that start a new chapter (default 35) |
+
+### `story refine`
+
+Find the best moment inside every chosen clip (sharp, steady, the action peak) and set the start times.
+
+```
+mh_video story refine [-h] --work WORK --storyboard STORYBOARD [--out OUT] [--workers WORKERS]
+```
+
+| Argument | Required / default | Meaning |
+|---|---|---|
+| `--work WORK` | required | work folder (inventory, scores, sheets, beats live here) |
+| `--storyboard STORYBOARD` | required | storyboard.json written by `story select` |
+| `--out OUT` |  | output file |
+| `--workers WORKERS` | default `4` | parallel workers (default: min(4, CPUs)) |
 
 ### `story exclusions`
 

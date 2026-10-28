@@ -316,6 +316,21 @@ def cmd_story(a) -> int:
         return 0
     beats = vl.load_json(a.beats) if getattr(a, "beats", None) else None
     notes = vl.load_json(a.notes) if getattr(a, "notes", None) else None
+    if a.action == "refine":
+        import vid_moment
+        sb = vl.load_json(a.storyboard)
+        res = vid_moment.refine_storyboard(sb, inv, scores, a.work, workers=a.workers, log=print)
+        out = Path(a.out or a.storyboard)
+        vl.save_json(out, res)
+        out.with_suffix(".md").write_text(vid_story.storyboard_markdown(res), encoding="utf-8")
+        clips = out.with_name(out.stem + "-clips.txt")
+        clips.write_text(vid_story.clip_list_text(res), encoding="utf-8")
+        for r in res["rows"]:
+            m = r.get("moment") or {}
+            print(f"  slot {r['slot']:>2} clip {r['clip']:>3}: start {r['start']:>6.2f}s  {m.get('motion_type', m.get('error', '?')):10} "
+                  f"score {m.get('score', '-')}  peak at {m.get('peak_at', '-')}  action ends {m.get('end_of_action', '-')}")
+        print(f"wrote {out}, {out.with_suffix('.md')} and {clips}")
+        return 0
     if a.action == "exclusions":
         import csv
         import vid_filter
@@ -519,6 +534,7 @@ def cmd_verify(a) -> int:
 
 
 ARG_HELP = {
+    "storyboard": "storyboard.json written by `story select`",
     "min_duration": "ignore clips shorter than this many seconds (default 5; 0 = all)",
     "keep_repeats": "keep every take of a moment (default: only the best take of each)",
     "chapters": "chapters.json: the story's chapters (name, from, to, weight, energy ...)",
@@ -643,6 +659,9 @@ def build_parser() -> argparse.ArgumentParser:
     q = ssub.add_parser("chapters", help="draft chapters from the capture timeline (name them, weight them, then select)")
     q.add_argument("--work", required=True); q.add_argument("--out"); q.add_argument("--gap", type=float, default=35.0,
                    help="minutes of pause that start a new chapter (default 35)")
+    q = ssub.add_parser("refine", help="find the best moment inside every chosen clip (sharp, steady, the action peak) and set the start times")
+    q.add_argument("--work", required=True); q.add_argument("--storyboard", required=True); q.add_argument("--out")
+    q.add_argument("--workers", type=int, default=4)
     q = ssub.add_parser("exclusions", help="which clips are left out and why (too short, shaky, covered, the weaker take of a moment ...)")
     q.add_argument("--work", required=True); q.add_argument("--chapters", help="chapters.json (its `filters` and `dedupe` settings apply)")
     q.add_argument("--notes"); q.add_argument("--out"); q.add_argument("--min-duration", type=float, help="seconds (default 5)")
