@@ -16,7 +16,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Check the tag matches VERSION
         run: |
           tag="${GITHUB_REF_NAME#v}"
@@ -32,7 +32,7 @@ jobs:
           print(m.group(0).strip() if m else f"Release {tag}")
           PY
       - name: Create the release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           body_path: RELEASE_NOTES.md
           name: ${{ github.ref_name }}
