@@ -147,7 +147,11 @@ def cmd_score(a) -> int:
     import vid_score
     recs = vid_probe.load_inventory(a.work)
     prev = {} if a.rescore else vid_score.load_previous(a.work)
-    scores = vid_score.score_inventory(recs, workers=a.workers, limit=a.limit, progress=print, previous=prev)
+    scores = vid_score.score_inventory(recs, workers=a.workers, limit=a.limit, progress=print, previous=prev,
+                                       min_duration=a.min_duration or 0.0)
+    if a.min_duration:
+        skipped = sum(1 for r in recs if r.get("dup_of") is None and (r.get("duration") or 0.0) < a.min_duration - 0.1)
+        print(f"{skipped} clip(s) under {a.min_duration:g} s were not measured (the selection never uses them)")
     path = vid_score.save_scores(scores, a.work)
     print(json.dumps(vid_score.summarize(scores), indent=2))
     print(f"scores: {path}")
@@ -722,6 +726,7 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("score", help="measure sharpness, exposure and motion of every clip; best window; same-scene hashes")
     p.add_argument("--work", required=True); p.add_argument("--workers", type=int); p.add_argument("--limit", type=int)
     p.add_argument("--rescore", action="store_true", help="ignore earlier scores (default: reuse unchanged files)")
+    p.add_argument("--min-duration", type=float, help="do not measure clips shorter than this many seconds (5 = the selection's rule; default: measure all)")
     p.set_defaults(fn=cmd_score)
     p = sub.add_parser("rank", help="table of the best (or most energetic) clips")
     p.add_argument("--work", required=True); p.add_argument("--by", default="quality", choices=["quality", "energy"])

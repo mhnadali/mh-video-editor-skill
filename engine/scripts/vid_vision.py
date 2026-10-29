@@ -77,11 +77,18 @@ def run(work: str | os.PathLike, only: Optional[str] = None, onnx: Optional[str]
     """Run the plug-in over the inventory of `work` and return what it found."""
     cmd = command(work, only, onnx, labels, frames, plugin_dir, force)
     log("running the local vision plug-in (offline) ...")
-    r = subprocess.run(cmd, capture_output=True, text=True)
-    if r.stdout.strip():
-        log(r.stdout.strip())
-    if r.returncode != 0:
-        raise vl.EngineError(f"the vision plug-in failed (exit {r.returncode}): {(r.stderr or r.stdout or '')[-400:]}")
+    # the plug-in prints its progress line by line: pass it on as it comes (a whole library takes minutes)
+    p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1)
+    out_lines = []
+    for line in p.stdout:
+        line = line.rstrip()
+        if line:
+            out_lines.append(line)
+            log(line)
+    err = p.stderr.read()
+    code = p.wait()
+    if code != 0:
+        raise vl.EngineError(f"the vision plug-in failed (exit {code}): {(err or chr(10).join(out_lines))[-400:]}")
     return load(work)
 
 

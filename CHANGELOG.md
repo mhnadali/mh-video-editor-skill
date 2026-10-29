@@ -2,6 +2,17 @@
 
 All notable changes to this project. Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [SemVer](https://semver.org/).
 
+## [0.21.0] - 2026-10-29 (phase E: speed and scale, measured)
+### Changed
+- **Review proxies are faster and reused.** Proxies decode without the deblocking filter and the B-frames (21-32 % faster on real 4K clips; they are only for choosing) and hold 14 s instead of 24 s; the window is in the file name, so a page made again after `story feedback` only makes proxies for new clips. The real 35-shot page: 291 s -> 157 s, a rebuild 13 s.
+- **Time left** in `score` progress and live progress (with time left) from `vision run`, which used to print nothing until it finished.
+
+### Added
+- `score --min-duration SECONDS`: clips shorter than that are not measured (5 = the selection's own rule; 11 % of the first real trip).
+
+### Measured and not changed
+- GPU decoding (d3d11va, dxva2, CUDA) was slower than software decoding on the test PC, so it is not the default. Scoring and `story refine` keep full decoding because their measurements (sharpness, motion) would change.
+
 ## [0.20.0] - 2026-10-29 (phase D: image quality, measured on real footage)
 ### Added
 - **`color cameras`** (`vid_camera.py`): matches the colour of the cameras of one trip to each other, estimated only from clips of two cameras filmed within a minute of each other, kept only with enough pairs and above its uncertainty, and anchored on the camera that filmed most (`--reference` to choose). Out of sample on the first real trip the camera difference fell from 0.135 to 0.102. `--edl EDL --write` multiplies the gains into the shots' corrections once; `color plan` then leaves white balance alone by default and keeps the camera gain on `--overwrite`.

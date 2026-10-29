@@ -20,6 +20,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -277,8 +278,14 @@ def main(argv=None) -> int:
                 and old.get("asked") == args.frames and old.get("engine") == cv2.__version__ and bool(args.onnx) == old.get("onnx", False)
                 and old.get("detector") == ("yunet" if args.face_model else "cascades"))
     work_list = [r for r in todo if not fresh(r)]
+    began = time.monotonic()
+    print(f"vision: {len(work_list)} clip(s) to look at, {len(todo) - len(work_list)} unchanged", flush=True)
     with ThreadPoolExecutor(args.workers) as ex:
-        for rec, res in zip(work_list, ex.map(lambda r: analyse_clip(r, scores.get(r["index"]), args, cascades, net, labels), work_list)):
+        for k, (rec, res) in enumerate(zip(work_list, ex.map(lambda r: analyse_clip(r, scores.get(r["index"]), args, cascades, net, labels), work_list)), 1):
+            if k % 25 == 0 or k == len(work_list):
+                rest = (time.monotonic() - began) / k * (len(work_list) - k)
+                print(f"vision: {k}/{len(work_list)}" + (f", about {rest / 60:.0f} min left" if rest >= 60 else f", about {rest:.0f} s left"),
+                      flush=True)
             res.update({"path": rec["path"], "size": rec.get("size"), "mtime": rec.get("mtime"), "asked": args.frames,
                         "engine": cv2.__version__, "onnx": bool(args.onnx)})
             clips[str(rec["index"])] = res

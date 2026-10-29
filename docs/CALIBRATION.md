@@ -59,3 +59,15 @@ duplicate. Put the settings you adopt in `chapters.json` under `dedupe` (`hash_b
 - **Stabilisation:** the shakiest clip (shake 2.59): jitter per second 2.41 -> 1.67 with `light`, 1.66 with `strong`.
 - **Frame rates:** every clip was 25-30 fps; 468 of 486 clips are vertical, so reframing from 16:9 hardly matters for this trip.
 - **Sound** was not judged: it needs listening.
+
+## Phase E measurements (same trip, one Windows PC, no NVIDIA encoder)
+- **Decoding is the cost.** 10 s of a 4K iPhone clip (H.264) decode in 1.7 s with all CPU threads and 5.3 s with two; the GPU
+  decoders available on this PC (d3d11va, dxva2, CUDA) were slower (2.4-2.9 s: the frames are copied back), so software
+  decoding stays the default.
+- **Review proxies:** skipping the deblocking filter and the B-frames (proxies only) made a proxy 32 % faster on the iPhone
+  (H.264) and 21 % on the Osmo (HEVC); with 14 s instead of 24 s per proxy the real 35-shot review page went from 291 s to 157 s,
+  and a rebuild after feedback (proxies reused) takes 13 s. Scoring and `story refine` measure sharpness and motion, so they
+  always decode every frame properly.
+- **Per clip, roughly:** `score` 1 s, `vision run` (YuNet) 0.7 s, a review proxy 2.2 s (shown clips only), `story refine` 4 s
+  (chosen clips only, cached). A 1000-clip library: about 17 minutes of scoring, 12 of vision, a few for review and refine.
+  `score --min-duration 5` skips the clips the selection never uses (11 % of this trip).
