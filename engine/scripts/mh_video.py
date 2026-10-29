@@ -396,8 +396,10 @@ def cmd_story(a) -> int:
         import vid_review
         sb = vl.load_json(a.storyboard)
         out = Path(a.out or Path(a.storyboard).with_name("review.html"))
-        vid_review.write(out, sb, inv, scores, a.work, beats=beats, notes=notes, log=print)
-        print(f"wrote {out}: open it in a browser (it works offline); decide, then press 'Export decisions' and run "
+        vid_review.write(out, sb, inv, scores, a.work, beats=beats, notes=notes, log=print, video=not a.no_video,
+                         workers=a.workers or 6)
+        print(f"wrote {out}" + ("" if a.no_video else f" and the proxy videos in {out.stem}_media/ (keep them together)") +
+              ": open it in a browser (it works offline); decide, then press 'Export decisions' and run "
               f"`story feedback --feedback decisions.json`")
         return 0
     cfg = vl.load_json(a.chapters)
@@ -606,6 +608,7 @@ ARG_HELP = {
     "frames": "frames looked at per clip",
     "profile": "profile.json of remembered preferences (default: <work>/profile.json and the global one)",
     "no_profile": "ignore remembered preferences",
+    "no_video": "no proxy videos: one self-contained page with frames only",
     "force": "look at every clip again, even those whose earlier result is still valid",
     "feedback": "decisions.json exported by the review page",
     "onnx": "an image-classification model of your own (ONNX); adds scene labels",
@@ -771,6 +774,8 @@ def build_parser() -> argparse.ArgumentParser:
     q = ssub.add_parser("review", help="write an offline HTML page to review a storyboard: frames, alternates, keep / replace / ban")
     q.add_argument("--work", required=True); q.add_argument("--storyboard", required=True); q.add_argument("--out")
     q.add_argument("--beats"); q.add_argument("--notes")
+    q.add_argument("--no-video", action="store_true", help="a single self-contained page without proxy videos (frames only)")
+    q.add_argument("--workers", type=int, help="parallel workers for frames and proxies (default 6)")
     q = ssub.add_parser("feedback", help="apply the decisions exported from the review page: update the storyboard and learn the user's taste")
     q.add_argument("--work", required=True); q.add_argument("--storyboard", required=True)
     q.add_argument("--feedback", required=True, help="decisions.json exported by the review page"); q.add_argument("--out")

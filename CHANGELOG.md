@@ -2,6 +2,15 @@
 
 All notable changes to this project. Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [SemVer](https://semver.org/).
 
+## [0.19.0] - 2026-10-28 (phase C: the review experience)
+### Added
+- **`story review` plays the clips.** Next to the page it makes a small proxy video of every shown clip (`<page>_media/`: 240 p, no sound, at most 24 s starting 6 s before the shot, about 90 KB each on the first real trip) and shows a player under the frame strip, already at the shot's start. **Start here** uses the frame on screen as the new start (`story feedback` applies `{"action": "start", "slot", "clip", "start"}`; a start meant for a clip that was replaced in the same round is ignored). `--no-video` keeps the page a single self-contained file.
+- **A timeline of the whole edit** at the top (each slot as wide as its shot, coloured by chapter, a click jumps to the slot), a **"What was left out, and why"** section (the exclusion reasons and the same-moment groups), **auto-save** in the browser (closing the page loses nothing), **Load decisions** (continue from an exported file) and **Start over**.
+- `story review --workers`. Frame extraction and proxies run in parallel.
+
+### Changed
+- `story feedback` applies replacements first, then keeps and starts, then bans.
+
 ## [0.18.0] - 2026-10-28 (phase B: content understanding, measured)
 Every change below was measured against clips labelled by eye on the first real trip; what failed the bar was left out (see `docs/CALIBRATION.md`).
 
