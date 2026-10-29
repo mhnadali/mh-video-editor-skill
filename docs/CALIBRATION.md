@@ -48,3 +48,14 @@ duplicate. Put the settings you adopt in `chapters.json` under `dedupe` (`hash_b
 - **Not predictable from the measurements:** the agent's role (establishing / portrait / action / detail) 52 % and mood 49 % in
   5-fold cross-validation (baselines 35 % and 48 %). People from the YuNet certainty: 58 % of the noted people found, 10 % of the
   others flagged.
+
+## Phase D measurements (same trip)
+- **Cameras, 130 pairs of clips of two cameras started within 60 s:** iPhone 17 vs Osmo Pocket 3 (95 pairs) R/G +0.054 +-0.008,
+  B/G -0.080 +-0.009 (log ratios); iPhone 15 vs Osmo (15 pairs) R/G +0.066 +-0.029, B/G within the noise; iPhone 17 vs iPhone 15
+  (20 pairs) B/G -0.028 +-0.009. Out of sample (estimated on day 1, applied with FFmpeg's `curves` to day 2 and measured again): mean
+  camera difference 0.135 -> 0.102; Osmo vs iPhone 17 R +0.090 -> +0.049, B -0.104 -> -0.052. An earlier version that entered
+  "within the noise" pairs as zero offsets and centred on the average camera moved the main camera and made the iPhone 15 worse;
+  both were changed.
+- **Stabilisation:** the shakiest clip (shake 2.59): jitter per second 2.41 -> 1.67 with `light`, 1.66 with `strong`.
+- **Frame rates:** every clip was 25-30 fps; 468 of 486 clips are vertical, so reframing from 16:9 hardly matters for this trip.
+- **Sound** was not judged: it needs listening.

@@ -349,7 +349,7 @@ mh_video need [-h] [--duration DURATION] [--period PERIOD] [--intro-shots INTRO_
 Beat grid + ordered clip list -> EDL.
 
 ```
-mh_video plan [-h] --beats BEATS --clips CLIPS --out OUT [--name NAME] [--music MUSIC] [--preset PRESET] [--duration DURATION] [--period PERIOD] [--intro-shots INTRO_SHOTS] [--grade GRADE] [--no-transitions] [--bar-align] [--body-start BODY_START] [--pacing {beat,energy}] [--follow-tempo] [--scores SCORES] [--smart-transitions] [--notes NOTES]
+mh_video plan [-h] --beats BEATS --clips CLIPS --out OUT [--name NAME] [--music MUSIC] [--preset PRESET] [--duration DURATION] [--period PERIOD] [--intro-shots INTRO_SHOTS] [--grade GRADE] [--no-transitions] [--bar-align] [--body-start BODY_START] [--pacing {beat,energy}] [--follow-tempo] [--scores SCORES] [--smart-transitions] [--notes NOTES] [--stabilize-shaky [SHAKE]]
 ```
 
 | Argument | Required / default | Meaning |
@@ -372,6 +372,7 @@ mh_video plan [-h] --beats BEATS --clips CLIPS --out OUT [--name NAME] [--music 
 | `--scores SCORES` |  | work folder containing scores.json: fill src_start from each clip's best window |
 | `--smart-transitions` |  | choose cuts and transitions from the content of each shot pair, with a written reason (needs --scores) |
 | `--notes NOTES` |  | shot-notes.json written by the agent (overrides measurements; with --smart-transitions) |
+| `--stabilize-shaky SHAKE` |  | light stabilisation for shots whose clip was measured shaky (shake >= SHAKE, default 1.5; needs --scores) |
 
 ## `cuts`
 
@@ -471,7 +472,7 @@ mh_video verify [-h] [--sheet SHEET] edl video
 Colour correction and grading tools.
 
 ```
-mh_video color [-h] {looks,lut,scope,analyze,plan} ...
+mh_video color [-h] {looks,lut,scope,analyze,plan,cameras} ...
 ```
 
 ### `color looks`
@@ -544,6 +545,23 @@ mh_video color plan [-h] [--match {exposure,reference,none}] [--reference REFERE
 | `--only ONLY` |  | shot numbers, e.g. 0-5,9 |
 | `--write` |  | store the proposal in the EDL (otherwise only print it) |
 | `--overwrite` |  | replace corrections that are already in the EDL |
+
+### `color cameras`
+
+Match the colour of the cameras to each other from clips they filmed at the same time.
+
+```
+mh_video color cameras [-h] --work WORK [--edl EDL] [--window WINDOW] [--workers WORKERS] [--write] [--reference REFERENCE]
+```
+
+| Argument | Required / default | Meaning |
+|---|---|---|
+| `--work WORK` | required | work folder (inventory, scores, sheets, beats live here) |
+| `--edl EDL` |  | an EDL to apply the camera gains to (with --write) |
+| `--window WINDOW` | default `60.0` | seconds between two clips of different cameras that count as the same moment |
+| `--workers WORKERS` |  | parallel workers (default: min(4, CPUs)) |
+| `--write` |  | store the proposal in the EDL (otherwise only print it) |
+| `--reference REFERENCE` |  | the camera the others are matched to (default: the one that filmed most), e.g. "DJI OsmoPocket3" |
 
 ## `text`
 

@@ -255,6 +255,12 @@ def cmd_plan(a) -> int:
         edl["transitions"] = {}
         vid_cutlogic.apply(edl, decisions, overwrite=True)
         print(vid_cutlogic.format_table(decisions, edl))
+    if a.stabilize_shaky is not None:
+        if not a.scores:
+            raise vl.EngineError("--stabilize-shaky needs --scores (the work folder with scores.json)")
+        import vid_score
+        js = vid_plan.stabilize_shaky(edl, vid_score.load_scores(a.scores), a.stabilize_shaky)
+        print(f"light stabilisation on {len(js)} shaky shot(s)" + (f": {', '.join(str(j) for j in js)}" if js else ""))
     vl.save_json(a.out, edl)
     print(f"wrote {a.out}: {len(edl['shots'])} shots, {len(edl['transitions'])} transitions")
     return 0
@@ -502,6 +508,27 @@ def cmd_color(a) -> int:
         if a.scope:
             print(vid_color.scope_sheet(a.source, a.scope, t, hdr=bool(info.get("hdr"))))
         return 0
+    if act == "cameras":
+        import vid_camera
+        import vid_probe
+        import vid_score
+        inv = vid_probe.load_inventory(a.work)
+        scores = vid_score.load_scores(a.work)
+        rep = vid_camera.estimate(inv, scores, a.work, window=a.window, workers=a.workers or 6, reference=a.reference)
+        vl.save_json(Path(a.work) / "camera_match.json", rep)
+        print(vid_camera.format_report(rep))
+        if not a.edl:
+            print(f"wrote {Path(a.work) / 'camera_match.json'}; add --edl EDL --write to apply the gains to an edit")
+            return 0
+        import vid_edl as ve
+        edl = ve.load(a.edl)
+        if not a.write:
+            print("(dry run: add --write to multiply the camera gains into the shots' corrections)")
+            return 0
+        n = vid_camera.apply_to_edl(edl, rep, inv)
+        vl.save_json(a.edl, edl)
+        print(f"matched the cameras of {n} shot(s) in {a.edl} (shots matched before were left alone)")
+        return 0
     if act == "plan":
         import vid_edl as ve
         edl = ve.load(a.edl)
@@ -609,6 +636,7 @@ ARG_HELP = {
     "profile": "profile.json of remembered preferences (default: <work>/profile.json and the global one)",
     "no_profile": "ignore remembered preferences",
     "no_video": "no proxy videos: one self-contained page with frames only",
+    "window": "seconds between two clips of different cameras that count as the same moment",
     "force": "look at every clip again, even those whose earlier result is still valid",
     "feedback": "decisions.json exported by the review page",
     "onnx": "an image-classification model of your own (ONNX); adds scene labels",
@@ -735,6 +763,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--smart-transitions", action="store_true",
                    help="choose cuts and transitions from the content of each shot pair, with a written reason (needs --scores)")
     p.add_argument("--notes", help="shot-notes.json written by the agent (overrides measurements; with --smart-transitions)")
+    p.add_argument("--stabilize-shaky", type=float, nargs="?", const=1.5, default=None, metavar="SHAKE",
+                   help="light stabilisation for shots whose clip was measured shaky (shake >= SHAKE, default 1.5; needs --scores)")
     p.set_defaults(fn=cmd_plan)
     p = sub.add_parser("vision", help="optional local, offline detection of people and faces (a plug-in with its own environment)")
     vsub = p.add_subparsers(dest="action", required=True)
@@ -835,6 +865,11 @@ def build_parser() -> argparse.ArgumentParser:
     q.add_argument("--reference", type=int, help="shot number to match (with --match reference)"); q.add_argument("--strength", type=float, default=0.8)
     q.add_argument("--wb", choices=["off", "median", "gray-world", "skin"], help="white balance: median (default with --match exposure), gray-world (opt-in), skin (protects warmth), off")
     q.add_argument("--only", help="shot numbers, e.g. 0-5,9"); q.add_argument("--write", action="store_true"); q.add_argument("--overwrite", action="store_true")
+    q = csub.add_parser("cameras", help="match the colour of the cameras to each other from clips they filmed at the same time")
+    q.add_argument("--work", required=True); q.add_argument("--edl", help="an EDL to apply the camera gains to (with --write)")
+    q.add_argument("--window", type=float, default=60.0, help="seconds between two clips of different cameras that count as the same moment")
+    q.add_argument("--workers", type=int); q.add_argument("--write", action="store_true")
+    q.add_argument("--reference", help="the camera the others are matched to (default: the one that filmed most), e.g. \"DJI OsmoPocket3\"")
     p.set_defaults(fn=cmd_color)
     p = sub.add_parser("text", help="on-screen text (Persian right-to-left supported)")
     tsub = p.add_subparsers(dest="action", required=True)
