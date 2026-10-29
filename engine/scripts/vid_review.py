@@ -36,11 +36,12 @@ PROXY_DECODE = ["-skip_loop_filter", "all", "-skip_frame", "bidir"]
 
 
 def strip_for(rec: dict, workdir: Path, size: int = FRAME) -> list:
-    """Three small JPEGs (base64) across the clip; a missing frame is skipped."""
+    """Three small JPEGs (base64) across the clip; a missing frame is skipped. The file's size and time are in the name, so a
+    strip kept in the media folder is reused when the page is made again (the frames were 90 % of a warm rebuild)."""
     out = []
     for k, pos in enumerate(vid_sheets.STRIP_POSITIONS):
-        p = workdir / f"{rec['index']}_{k}.jpg"
-        if vid_sheets._thumb(rec, p, size, pos, None):                    # noqa: SLF001
+        p = workdir / f"{rec['index']}_{rec.get('size', 0)}_{int(rec.get('mtime') or 0)}_{size}_{k}.jpg"
+        if (p.is_file() and p.stat().st_size > 100) or vid_sheets._thumb(rec, p, size, pos, None):      # noqa: SLF001
             out.append(base64.b64encode(p.read_bytes()).decode("ascii"))
     return out
 
@@ -370,7 +371,9 @@ def write(out: str | os.PathLike, sb: dict, inventory: list, scores: dict, work:
     out = Path(out)
     media = out.with_name(out.stem + "_media") if video else None
     with tempfile.TemporaryDirectory(prefix="mhvid_review_") as d:
-        data = build_data(sb, inventory, scores, Path(d), beats, log, workers, media, (media.name + "/") if media else "")
+        strips = media / "strips" if media else Path(d)
+        strips.mkdir(parents=True, exist_ok=True)
+        data = build_data(sb, inventory, scores, strips, beats, log, workers, media, (media.name + "/") if media else "")
     text = json.dumps(data, ensure_ascii=False).replace("</", "<\\/").replace("<!--", "<\\!--")
     out.write_text(PAGE.replace("__DATA__", text), encoding="utf-8")
     return out

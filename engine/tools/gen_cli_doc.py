@@ -15,8 +15,8 @@ sys.path.insert(0, str(ROOT / "engine" / "scripts"))
 import mh_video  # noqa: E402
 
 OUT = ROOT / "docs" / "CLI.md"
-PIPELINE = ["doctor", "probe", "sheets", "score", "rank", "pick", "beats", "vision", "story", "need", "plan", "cuts", "lint", "render", "qa", "verify",
-            "color", "text", "sfx", "audio", "music"]
+PIPELINE = ["doctor", "prepare", "probe", "sheets", "score", "rank", "pick", "beats", "vision", "story", "need", "plan", "cuts", "lint", "render", "qa", "verify",
+            "color", "text", "sfx", "audio", "music", "clean"]
 PIPE = "\\|"                                                                 # a literal pipe inside a Markdown table cell
 
 

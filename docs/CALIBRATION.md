@@ -119,3 +119,10 @@ duplicate. Put the settings you adopt in `chapters.json` under `dedupe` (`hash_b
   the agent read, "voices" came out for 32 % of the people clips against 18 % of the action clips, "rumble" (engines) for 35 % of the
   action clips, "wind" for 28 % of the landscapes: the right direction, not yet proof. 461 clips measure in 18 s. The thresholds
   wait for the user's ears (listening page, `calibrate_audio.py`).
+
+## Phase L measurements (same trip, one Windows PC)
+- **`prepare` on the real project, everything up to date:** 14.2 s, of which 12.7 s was the review page re-extracting its frame strips;
+  with the strips kept next to the proxies a rebuild of the page takes 0.3 s (13.7 s before), so a warm `prepare` takes about 2 s.
+  Probe and beats are skipped when the footage and the song have not changed; score, vision and the audio scan measure new clips only.
+- **The re-probe guard matters:** the Kavir inventory was made with the Osmo clock 30 minutes back; `prepare` keeps that correction
+  (and skips the probe when the inventory already matches the folder: the inventory stayed byte-identical).
