@@ -4,7 +4,8 @@ Each slot shows the chosen clip and its alternates as a strip of three frames an
 of the clip that can be played and scrubbed, why the clip was chosen, and the decisions: keep it (pin it), use an alternate
 instead, ban the clip, or set its start to the frame on screen. A timeline of the whole edit (each slot as wide as its shot) jumps
 to a slot, and the music's energy is drawn against the energy of the chosen shots, so a flat or contradicting stretch is visible at
-once. Decisions are saved in the browser as you go (so closing the page loses nothing) and 'Export decisions' downloads a
+once. "Play the storyboard" plays the whole edit at its real timing over the music (the proxies, cut at the storyboard's slot
+times, no render), with the user's own choices: a replaced clip or a start set with *Start here* plays at once. Decisions are saved in the browser as you go (so closing the page loses nothing) and 'Export decisions' downloads a
 `decisions.json` that `story feedback` applies: the storyboard changes and the engine remembers the taste (see vid_profile.py).
 
 The proxies live in a folder next to the page (`<page>_media/`, about 50-100 KB per clip: 240 p, no sound, at most 14 s around the
@@ -64,6 +65,23 @@ def make_proxy(rec: dict, dest: Path, offset: float, span: float) -> bool:
     return r.returncode == 0 and dest.is_file() and dest.stat().st_size > 200
 
 
+def make_music(beats: Optional[dict], seconds: float, media_dir: Path) -> Optional[str]:
+    """The first `seconds` of the music as a small AAC file next to the proxies (for playing the storyboard), or None."""
+    src = (beats or {}).get("file")
+    if not src or not os.path.isfile(src) or not seconds:
+        return None
+    st = os.stat(src)
+    import hashlib
+    name = "music_" + hashlib.sha1(json.dumps([os.path.abspath(src), st.st_size, int(st.st_mtime), round(seconds, 2)]).encode()).hexdigest()[:12] + ".m4a"
+    dest = media_dir / name
+    if dest.is_file() and dest.stat().st_size > 1000:
+        return name
+    media_dir.mkdir(parents=True, exist_ok=True)
+    r = vl.run([vl.find_ffmpeg()["ffmpeg"], "-v", "error", "-y", "-i", src, "-t", f"{seconds + 0.5:.2f}", "-vn", "-c:a", "aac", "-b:a", "128k",
+                "-movflags", "+faststart", str(dest)], check=False)
+    return name if r.returncode == 0 and dest.is_file() and dest.stat().st_size > 1000 else None
+
+
 def build_data(sb: dict, inventory: list, scores: dict, workdir: Path, beats: Optional[dict] = None, log=print,
                workers: int = 6, media_dir: Optional[Path] = None, media_url: str = "") -> dict:
     """The data the page shows. With `media_dir` a proxy video of every clip is made there (`media_url` is the path the page
@@ -110,7 +128,12 @@ def build_data(sb: dict, inventory: list, scores: dict, workdir: Path, beats: Op
         entry["clips"] = clips
         rows.append(entry)
     ex = sb.get("exclusions") or {}
+    music = make_music(beats, float(sb.get("duration") or 0.0), media_dir) if media_dir is not None else None
     return {"duration": sb.get("duration"), "variant": sb.get("variant"), "rows": rows,
+            "music": f"{media_url}{music}" if music else None,
+            "sections": [{"t": round(float(s.get("start", 0.0)), 2), "kind": s.get("kind") or s.get("label")}
+                         for s in (beats or {}).get("sections") or []
+                         if 0.0 < float(s.get("start", 0.0)) < float(sb.get("duration") or 0.0)],
             "left_out": {"by_reason": ex.get("by_reason") or {}, "clips": ex.get("clips"), "usable": ex.get("usable"),
                          "same_moment": sb.get("same_moment") or []}}
 
@@ -141,12 +164,20 @@ button{font:inherit;border:1px solid var(--line);background:var(--bg);color:var(
 button:hover{border-color:var(--acc)}button:disabled{opacity:.5;cursor:default}.pri{background:var(--acc);color:#fff;border-color:var(--acc)}
 details{margin:14px 0}summary{cursor:pointer;color:var(--mut)}
 @media (max-width:600px){.strip img{height:80px}video{height:180px}}
+#player{display:flex;gap:14px;align-items:flex-start;margin:6px 0 14px}
+.screen{position:relative;width:180px;height:320px;background:#000;border-radius:8px;overflow:hidden;flex:none}
+.screen video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;margin:0;border-radius:0;visibility:hidden}
+#timeline div.now{outline:3px solid var(--fg);outline-offset:-3px}
 </style></head><body><main>
 <h1>Storyboard review</h1>
 <div class="sub" id="sub"></div>
 <div id="timeline"></div>
 <canvas id="curve" width="960" height="90"></canvas>
-<div class="sub">Line = energy of the chosen shots; bars = energy the music asks for. Click a block above to jump to that slot.</div>
+<div class="sub">Line = energy of the chosen shots; bars = energy the music asks for; dashed lines = where the music changes (red: a drop). Click a block above to jump to that slot.</div>
+<div id="player"><div class="screen"><video id="pa" muted playsinline preload="auto"></video><video id="pb" muted playsinline preload="auto"></video></div>
+<div><button class="pri" id="play">Play the storyboard</button><div class="sub" id="now"></div>
+<div class="sub" id="playnote">The whole edit at its real timing, with your choices, over the music. A rough cut: no transitions or colour, 240 p.</div></div>
+<audio id="music" preload="auto"></audio></div>
 <div id="slots"></div>
 <details id="leftout"><summary>What was left out, and why</summary><div id="leftouttext" class="sub"></div></details>
 <p><button class="pri" id="export">Export decisions</button> <button id="import">Load decisions</button>
@@ -253,6 +284,9 @@ function curve(){
   DATA.rows.forEach((r,k)=>{ const x=k*W/n, w=W/n-2; const h=(r.music||0)*(H-10); g.fillStyle='rgba(120,140,200,.35)'; g.fillRect(x+1,H-h,w,h); });
   g.strokeStyle='#e0651a'; g.lineWidth=2; g.beginPath();
   DATA.rows.forEach((r,k)=>{ const x=(k+.5)*W/n, y=H-5-(r.energy||0)*(H-10); k?g.lineTo(x,y):g.moveTo(x,y); }); g.stroke();
+  (DATA.sections||[]).forEach(s=>{ const k=slotAt(s.t), r=DATA.rows[k]||{}, f=Math.min(1,Math.max(0,(s.t-(r.t||0))/(r.len||1)));
+    const x=(k+f)*W/n; g.strokeStyle=(s.kind==='drop')?'#c62828':'#888'; g.lineWidth=1; g.setLineDash&&g.setLineDash([4,3]);
+    g.beginPath(); g.moveTo(x,0); g.lineTo(x,H); g.stroke(); g.setLineDash&&g.setLineDash([]); });
 }
 function leftOut(){
   const lo=DATA.left_out||{}, t=document.getElementById('leftouttext'); t.textContent='';
@@ -262,6 +296,58 @@ function leftOut(){
   (lo.same_moment||[]).forEach(g=>t.append(el('div',null,'The same moment filmed more than once: clip '+g.keep+' kept, '+(g.drop||[]).join(', ')+' dropped.')));
   if(!parts.length && !(lo.same_moment||[]).length) document.getElementById('leftout').style.display='none';
 }
+// ---- play the storyboard: two video elements take turns (one plays, the other is cued on the next slot), the music is the clock;
+// a 25 ms timer, not requestAnimationFrame, which stops while the page is not drawn
+function shotOf(r){
+  const cur = chosen[r.slot] ?? r.clip;
+  const c = r.clips.find(x=>x.index===cur) || r.clips[0];
+  return {c, at: (started[r.slot]!==undefined ? started[r.slot] : c.start)};
+}
+function slotAt(t){ for(let k=DATA.rows.length-1;k>0;k--) if(t >= (DATA.rows[k].t||0)) return k; return 0; }
+const P = {on:false, k:-1, t0:0, cur:null, next:null};
+function clock(){ const a=document.getElementById('music'); return DATA.music ? a.currentTime : (Date.now()-P.t0)/1000; }
+function cue(v, k){
+  const s = shotOf(DATA.rows[k]); v.dataset = v.dataset || {}; v.dataset.k = String(k);
+  if(!s.c.video){ v.removeAttribute && v.removeAttribute('src'); v.src=''; return; }
+  const go = ()=>{ v.currentTime = Math.max(0, s.at - s.c.voffset); };
+  if(v.src !== s.c.video && (!v.getAttribute || v.getAttribute('src') !== s.c.video)){ v.src = s.c.video; v.onloadedmetadata = go; } else go();
+}
+function mark(k){
+  const tl=document.getElementById('timeline'); Array.from(tl.children||[]).forEach((d,i)=>{ d.className = (i===k?'now':''); });
+  const r = DATA.rows[k]; document.getElementById('now').textContent = k<0 ? '' : 'Slot '+r.slot+' · '+(r.chapter||'')+' · clip '+shotOf(r).c.index;
+}
+function tick(){
+  if(!P.on) return;
+  const t = clock(), k = slotAt(t);
+  if(k !== P.k){
+    let v = (P.next && P.next.dataset && +P.next.dataset.k === k) ? P.next : P.cur;
+    if(!v.dataset || +v.dataset.k !== k) cue(v, k);
+    const other = (v === P.cur) ? P.next : P.cur;
+    v.style.visibility='visible'; const pr = v.play && v.play(); if(pr && pr.catch) pr.catch(()=>{});
+    if(other){ other.pause && other.pause(); other.style.visibility='hidden'; }
+    P.cur = v; P.next = other; P.k = k;
+    if(k+1 < DATA.rows.length) cue(P.next, k+1);
+    mark(k);
+  }
+  if(t >= (DATA.duration||0)) { stopPlay(); return; }
+  setTimeout(tick, 25);
+}
+function startPlay(){
+  const a=document.getElementById('music'), pa=document.getElementById('pa'), pb=document.getElementById('pb');
+  P.on=true; P.k=-1; P.cur=pa; P.next=pb; cue(pa,0); if(DATA.rows.length>1) cue(pb,1);
+  P.t0 = Date.now();
+  if(DATA.music){ if(a.getAttribute && a.getAttribute('src')!==DATA.music) a.src=DATA.music; a.currentTime=0; const pr=a.play&&a.play(); if(pr&&pr.catch) pr.catch(()=>{}); }
+  document.getElementById('play').textContent='Stop';
+  setTimeout(tick, 25);
+}
+function stopPlay(){
+  P.on=false; const a=document.getElementById('music'); a.pause && a.pause();
+  ['pa','pb'].forEach(id=>{ const v=document.getElementById(id); v.pause && v.pause(); v.style.visibility='hidden'; });
+  document.getElementById('play').textContent='Play the storyboard'; mark(-1);
+}
+document.getElementById('play').onclick=()=>{ P.on ? stopPlay() : startPlay(); };
+if(!DATA.rows.some(r=>r.clips.some(c=>c.video))){ document.getElementById('player').style.display='none'; }
+else if(!DATA.music){ document.getElementById('playnote').textContent='No music file was found (give --beats with the beats.json of the music): it plays silent at the real timing.'; }
 document.getElementById('sub').textContent = (DATA.variant||'')+' · '+(DATA.duration||'')+' s · '+DATA.rows.length+' shots';
 document.getElementById('export').onclick=()=>{
   const out={decisions:decisions.map(d=>Object.assign({},d))};

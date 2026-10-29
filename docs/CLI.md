@@ -187,7 +187,7 @@ mh_video vision run [-h] --work WORK [--only ONLY] [--frames FRAMES] [--onnx ONN
 Story-first selection: chapters, a storyboard to approve, and an audit of an EDL.
 
 ```
-mh_video story [-h] {chapters,refine,exclusions,select,review,feedback,profile,audit} ...
+mh_video story [-h] {chapters,refine,exclusions,select,review,feedback,profile,hook,audit} ...
 ```
 
 ### `story chapters`
@@ -312,6 +312,23 @@ mh_video story profile [-h] --work WORK [--profile PROFILE] [--promote] [--forge
 | `--profile PROFILE` |  | profile.json of remembered preferences (default: <work>/profile.json and the global one) |
 | `--promote` |  | add this project's topic / role biases and weights to the global profile |
 | `--forget-global` |  | show and delete the global profile (projects keep their own) |
+
+### `story hook`
+
+How strong the storyboard's opening is, the best teaser shots to open with, and whether the end loops.
+
+```
+mh_video story hook [-h] --work WORK --storyboard STORYBOARD [--chapters CHAPTERS] [--notes NOTES] [--top TOP] [--out OUT]
+```
+
+| Argument | Required / default | Meaning |
+|---|---|---|
+| `--work WORK` | required | work folder (inventory, scores, sheets, beats live here) |
+| `--storyboard STORYBOARD` | required | storyboard.json written by `story select` |
+| `--chapters CHAPTERS` |  | chapters.json: the story's chapters (name, from, to, weight, energy ...) |
+| `--notes NOTES` |  | shot-notes.json: the agent's reading of the footage (role, mood, people, topic, shot_size ...) |
+| `--top TOP` | default `5` | how many teaser candidates to show (default 5) |
+| `--out OUT` |  | write the ranking here (default: <storyboard>.hook.json) |
 
 ### `story audit`
 

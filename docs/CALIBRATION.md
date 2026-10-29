@@ -89,3 +89,18 @@ duplicate. Put the settings you adopt in `chapters.json` under `dedupe` (`hash_b
   night shots are low: the phones denoise them). So no automatic deband or denoise was built.
 - **A fade of 0 s faded in over 25 frames** (FFmpeg reads `fade d=0` as its default length; `afade d=0` as one second): found by these
   measurements, fixed.
+
+## Phase I measurements (same trip): the opening and the ending
+- **The measured energy does not find a hook.** Ranked by energy (motion and sound), the top five opening candidates were people
+  talking, a phone pointed at the floor and a tyre being strapped: handheld wobble and loud talk score high. Against the agent's
+  notes (174 clips read, 42 action or intense) energy has an AUC of 0.48 (chance). The features that did separate action there
+  (quality 0.74, low texture 0.75, low contrast 0.70, saturation 0.65) describe desert sand, not action in general. So `story hook`
+  ranks the clips the agent has read (role and mood), with quality, colour and freshness as tie-breakers; on Kavir its top five
+  are dune drives from both days and the burgers over the embers, one per scene.
+- **A loop needs the same place.** 20 labelled same-place pairs were at most 19 bits apart in the picture hash (colour signature
+  median 7, at most 20); 3000 random pairs had a median of 32 bits (5th percentile 24) and colour 37. A loop is called at 20 bits and
+  colour 15. The new storyboard's last shot is 32 bits from its first: no loop.
+- **Playing the storyboard** was checked in a browser on the real 35-shot page: the slot on screen followed the music's clock in
+  every sample and each proxy sat at its storyboard start (slot 9: 19.61 s against 19.63 s). Two bugs the node stub could not show
+  (`HTMLCollection` has no `forEach`; `requestAnimationFrame` stops while the page is not drawn) were fixed, and the stub now
+  behaves like the browser in both.

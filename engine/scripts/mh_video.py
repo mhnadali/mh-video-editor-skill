@@ -430,6 +430,21 @@ def cmd_story(a) -> int:
         print(vid_profile.describe(prof))
         print(f"wrote {ppath} and the updated storyboard {out}; the next `story select` uses what was learned")
         return 0
+    if a.action == "hook":
+        import vid_hook
+        sb, moved = vid_story.relink(vl.load_json(a.storyboard), inv)
+        if moved:
+            print("the inventory changed since this storyboard was made: its clips were found again by their paths")
+        cfg = vl.load_json(a.chapters) if a.chapters else {}
+        rank = vid_hook.hook_rank(inv, scores, sb, cfg, notes, top=a.top)
+        loop = vid_hook.loop_fit(sb, scores)
+        print(vid_hook.format_report(rank, loop))
+        out = Path(a.out or Path(a.storyboard).with_suffix(".hook.json"))
+        vl.save_json(out, {"opening": rank, "loop": loop})
+        print(f"wrote {out}. A proposal: to open with a teaser, show the candidates to the user (`sheets --only N`), then put "
+              "\"hook\": \"teaser\", \"teaser_clip\": N in chapters.json, run `story select` again and get the storyboard approved. "
+              "A chronological story may keep its calm opening.")
+        return 0
     if a.action == "review":
         import vid_review
         sb, moved = vid_story.relink(vl.load_json(a.storyboard), inv)
@@ -860,6 +875,10 @@ def build_parser() -> argparse.ArgumentParser:
     q.add_argument("--work", required=True); q.add_argument("--profile")
     q.add_argument("--promote", action="store_true", help="add this project's topic / role biases and weights to the global profile")
     q.add_argument("--forget-global", action="store_true", help="show and delete the global profile (projects keep their own)")
+    q = ssub.add_parser("hook", help="how strong the storyboard's opening is, the best teaser shots to open with, and whether the end loops")
+    q.add_argument("--work", required=True); q.add_argument("--storyboard", required=True); q.add_argument("--chapters")
+    q.add_argument("--notes"); q.add_argument("--top", type=int, default=5, help="how many teaser candidates to show (default 5)")
+    q.add_argument("--out", help="write the ranking here (default: <storyboard>.hook.json)")
     q = ssub.add_parser("audit", help="check an EDL against the story principles (chapters, cameras, people, energy vs music, order)")
     q.add_argument("edl"); q.add_argument("--work", required=True); q.add_argument("--beats"); q.add_argument("--notes")
     q.add_argument("--chapters"); q.add_argument("--free-order", action="store_true", help="do not require the trip order")
