@@ -36,7 +36,7 @@ class Cache(unittest.TestCase):
         return tr.tiny_edl(tr.spans(self.clips, 3.0), 3.0, music=vl.ffp(self.music) if with_music else None)
 
     def parts(self, name):
-        return sorted((self.root / f"{name}_work" / "parts" / "main").glob("*.mp4"))
+        return sorted(f for f in (self.root / f"{name}_work" / "parts" / "main").iterdir() if f.suffix in vr.PART_EXTS)
 
     def test_a_part_cut_short_by_a_crash_is_rendered_again(self):
         res, path = tr.render(self.edl(), self.root, "trunc")

@@ -70,6 +70,11 @@ def cmd_doctor(a) -> int:
     hw = vid_render.hw_encoders()
     avail = [k for k, v in hw.items() if v]
     print(f"info hardware H.264 encoders: {', '.join(avail) if avail else 'none detected (libx264 will be used)'}")
+    me = vid_render.master_encoder()
+    print(f"{'ok  ' if me else 'info'} 10-bit HEVC master (render --master): {me or 'no libx265 / hevc_nvenc / hevc_videotoolbox here'}")
+    ffv1 = "ffv1" in enc
+    ok &= ffv1
+    print(f"{'ok  ' if ffv1 else 'FAIL'} encoder ffv1 (lossless 10-bit parts of final renders)")
     font = vl.find_font()
     print(f"{'ok  ' if font else 'warn'} font for contact-sheet labels: {font or 'none found (sheets will be unlabeled)'}")
     print(f"info filter-graph file option: {vl.filter_script_flag()}")
@@ -281,7 +286,7 @@ def cmd_render(a) -> int:
     import vid_render
     kw = dict(preview=a.preview, encoder=a.encoder, workdir=a.work, use_cache=not a.no_cache, force=a.force, workers=a.workers,
               hwdecode=a.hwdecode, qa=a.qa, delivery=a.delivery, target_size_mb=a.target_size_mb, bitrate=a.bitrate,
-              manifest=a.manifest, bundle=a.bundle, json_out=a.json, quality=a.quality)
+              manifest=a.manifest, bundle=a.bundle, json_out=a.json, quality=a.quality, master=a.master)
     if a.all_formats:
         print(json.dumps(vid_render.render_formats(a.edl, None, **kw), indent=2))
     else:
@@ -889,6 +894,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--json", help="also write the render result (paths, sizes, verdict) to this JSON file")
     p.add_argument("--quality", choices=["standard", "high", "max"],
                    help="constant-quality level of a final render: high (default) is close to the source, max is near lossless, standard is lighter; previews are always standard")
+    p.add_argument("--master", action="store_true",
+                   help="also write <name>_master.mp4: the same edit as 10-bit HEVC (Main 10) for archiving or HEVC uploads (needs libx265 or a GPU HEVC encoder)")
     p.set_defaults(fn=cmd_render)
     p = sub.add_parser("qa", help="quality gate on a rendered video: defects, loudness, cut timing, effect audit")
     p.add_argument("video"); p.add_argument("--edl"); p.add_argument("--scores", help="work folder with scores.json (audits clip quality)")

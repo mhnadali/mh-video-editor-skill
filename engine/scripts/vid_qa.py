@@ -75,8 +75,8 @@ def measure_picture(video: str | os.PathLike, fps: float = 30.0) -> dict:
              "[a]signalstats,metadata=print:file=sig.txt,nullsink;"
              "[b]select='gte(scene,0)',metadata=print:key=lavfi.scene_score:file=scene.txt,nullsink;"
              "[c]tblend=all_mode=difference,signalstats,metadata=print:file=diff.txt[o]")
-    with tempfile.TemporaryDirectory(prefix="mhvid_qa_") as d:
-        r = subprocess.run([vl.find_ffmpeg()["ffmpeg"], "-v", "error", "-i", vl.ffp(video), "-an", "-filter_complex", graph,
+    with tempfile.TemporaryDirectory(prefix="mhvid_qa_") as d:          # FFmpeg runs in `d`: the video path must be absolute
+        r = subprocess.run([vl.find_ffmpeg()["ffmpeg"], "-v", "error", "-i", vl.ffp(Path(video).resolve()), "-an", "-filter_complex", graph,
                             "-map", "[o]", "-f", "null", "-"], capture_output=True, text=True, cwd=d)
         sig = _read_series(Path(d) / "sig.txt", "lavfi.signalstats.", ("YAVG", "YLOW", "YMAX", "UAVG", "VAVG", "SATAVG"))
         scene = _read_series(Path(d) / "scene.txt", "lavfi.", ("scene_score",))["scene_score"]

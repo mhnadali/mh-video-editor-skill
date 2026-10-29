@@ -2,6 +2,33 @@
 
 All notable changes to this project. Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [SemVer](https://semver.org/).
 
+## [0.24.0] - 2026-10-29 (phase H: the picture)
+Measured on real Kavir shots against the same shots rendered without any lossy step (numbers in `docs/CALIBRATION.md`).
+
+### Changed
+- **Final renders keep 10 bits until the end and their colours come out exact.** The cached parts of a final render are 10-bit
+  (`high`: x264 10-bit CRF 6; `max`: lossless FFV1), HLG clips keep their 10 bits after the tone mapping, and the edit is assembled
+  in 16-bit YUV and dithered once to 8 bits (error diffusion). Every conversion between YUV and RGB states the Rec.709 matrix:
+  colour patches through a whole edit now come back exact, the old chain made them 1-2 levels darker. Chroma PSNR +0.19 / +0.14 dB,
+  SSIM +0.10 dB on real shots; parts take about twice the disk. Previews and `--quality standard` keep the light 8-bit parts.
+
+### Added
+- `render --master`: also writes `<name>_master.mp4`, the same edit as 10-bit HEVC (Main 10, `hvc1`) with libx265 (or
+  hevc_nvenc / hevc_videotoolbox); the delivery file stays 8-bit H.264. `doctor` reports the master encoder and FFV1.
+- The render result reports `parts` (8-bit, 10-bit, 10-bit lossless) and `parts_mb`.
+
+### Fixed
+- **`fade_in: 0` faded the video in over 25 frames, and a music fade of 0 s over one second**: FFmpeg reads a fade of `d=0` as its
+  default length; a 0 s fade is now left out.
+- **A cached part cut off by a crash could be reused when it was Matroska**: MKV writes its duration up front, so the packets are counted.
+- **`gc_cache` could delete a part the current render still used**: reusing a cached part now marks it as used.
+- **`qa` (and `render --qa`) failed on a video given by a relative path** ("picture analysis failed ... No such file"): the analysis
+  runs FFmpeg in a temporary folder; the path is made absolute first. Found by the real 35-shot render of this phase (QA 100/100).
+
+### Measured, not built
+- Debanding and denoising: on all 35 storyboard shots banding is below the visible threshold in 33 (CAMBI under 5) and the noise
+  is low (median 1.1 levels); the "noisy" shots are sand texture. No automatic filter was added.
+
 ## [0.23.1] - 2026-10-29 (audit of 0.17 - 0.23 on the real pipeline)
 Every claim of 0.17.0 - 0.23.0 was checked against the code, the command line and the documents (86 checks), then the whole new workflow ran end to end on the real Kavir project (score, vision, select, refine, review decisions, feedback, refine again, cut-down, plan with smart transitions and stabilisation, camera match, colour plan, lint, audit, a preview render with QA 100/100, the camera gains measured in the rendered picture). The interactions it found are fixed, each with a test (`test_interactions.py`).
 
