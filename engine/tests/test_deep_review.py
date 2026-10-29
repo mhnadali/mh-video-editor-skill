@@ -201,7 +201,7 @@ class ReviewPage(unittest.TestCase):
         try:
             with tempfile.TemporaryDirectory() as d:
                 page = Path(d) / "r.html"
-                vid_review.write(page, sb, inv, sc, d, log=lambda *_: None)
+                vid_review.write(page, sb, inv, sc, d, log=lambda *_: None, video=False)
                 text = page.read_text(encoding="utf-8")
                 js = Path(d) / "r.js"
                 js.write_text(text.split("<script>", 1)[1].split("</script>", 1)[0], encoding="utf-8")

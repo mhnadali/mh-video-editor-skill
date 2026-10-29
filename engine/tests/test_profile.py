@@ -164,7 +164,7 @@ class ReviewPage(unittest.TestCase):
             orig = vid_review.strip_for
             vid_review.strip_for = lambda rec, wd, size=140: ["QUJD"]
             try:
-                vid_review.write(out, sb, inv, sc, d, log=lambda *_: None)
+                vid_review.write(out, sb, inv, sc, d, log=lambda *_: None, video=False)
             finally:
                 vid_review.strip_for = orig
             text = out.read_text(encoding="utf-8")
