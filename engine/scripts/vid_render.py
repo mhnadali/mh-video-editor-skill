@@ -89,9 +89,9 @@ def master_encoder() -> str | None:
         return _ENC_CACHE["master"]
     found = None
     for name, args in MASTER_ENCODERS.items():
-        cmd = [vl.find_ffmpeg()["ffmpeg"], "-v", "error", "-f", "lavfi", "-i", "color=c=gray:s=256x256:d=0.2"] + args + \
-              ["-pix_fmt", "p010le" if name == "hevc_videotoolbox" else MASTER_PIX_FMT, "-f", "null", "-"]
         try:
+            cmd = [vl.find_ffmpeg()["ffmpeg"], "-v", "error", "-f", "lavfi", "-i", "color=c=gray:s=256x256:d=0.2"] + args + \
+                  ["-pix_fmt", "p010le" if name == "hevc_videotoolbox" else MASTER_PIX_FMT, "-f", "null", "-"]
             if vl.run(cmd, check=False, timeout=30).returncode == 0:
                 found = name
                 break
