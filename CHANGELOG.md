@@ -2,6 +2,13 @@
 
 All notable changes to this project. Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [SemVer](https://semver.org/).
 
+## [0.23.0] - 2026-10-29 (phase G: engineering)
+### Added
+- **`engine/tools/fuzz_selection.py`:** the randomized rule check from the deep review is now a tool (random libraries, chapters, profiles, lengths, variants and feedback against twelve rules); `test_fuzz_selection.py` runs a batch on every test run and checks that the checker catches planted violations. 300 random selections and 100 feedback sequences pass.
+
+### Changed
+- `docs/ROADMAP.md` and `docs/ARCHITECTURE.md` describe the current pipeline, modules, tests, the optional vision plug-in and what is next (the owner's decisions and the bar for 1.0).
+
 ## [0.22.0] - 2026-10-29 (phase F: several outputs from one approval, taste across projects)
 ### Added
 - **Cut-downs:** `story select --cut-from storyboard.json --duration N` makes another length from an approved storyboard only, at its approved starts (a banned row is not approved). When the new length has fewer slots than chapters, the lightest chapters are left out with a warning instead of an error. A 15 s cut of the real 45 s storyboard kept the stronger shots (0.80 against 0.76) in trip order.

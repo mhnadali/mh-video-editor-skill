@@ -5,10 +5,15 @@ Request -> Step 0 discovery -> video-brief.md (CONFIRMED, frozen)
               |
    probe --> inventory.json         (duration, rotation, fps, HDR, duplicates)
    sheets -> sheetNN.jpg            (what the footage looks like; the agent READS these)
-   score --> scores.json            (quality, energy, best window, flags, same-scene hash; cached per file)
-   pick ---> clips.txt              (story-ordered CANDIDATES, reviewed by the agent)
+   score --> scores.json            (quality, energy, best window, flags, picture hashes, shot size; cached per file, schema-versioned)
+   vision -> vision.json            (optional offline plug-in, its own Python: faces / people, YuNet or cascades)
    beats --> beats.json             (BPM, period, first beat, drop, downbeats, validation notes)
-   need/plan -> video.edl.json      (single source of truth)
+   story chapters -> chapters.json  (the agent names and weighs the trip's chapters)
+   story select ---> storyboard.json/.md (filters, same-moment groups, beam search over the whole sequence, reasons, alternates)
+   story refine / review / feedback  (best moment per clip; offline review page; decisions -> storyboard + profile.json)
+        ... the USER approves the storyboard ...
+   plan -----> video.edl.json       (single source of truth; cuts --write adds the cut types and reasons)
+   color cameras / color plan        (camera matching from simultaneous clips; per-shot correction)
    lint ---> errors block, warnings = restraint budget
    render -> parts (cached) -> one filter graph -> encoder (NVENC | libx264)
    qa -----> picture + sound measurements, EDL-aware checks, verdict, JSON report, contact sheet
@@ -39,6 +44,14 @@ Request -> Step 0 discovery -> video-brief.md (CONFIRMED, frozen)
 | `vid_text.py` | font discovery, Persian shaping helpers, wrapping, safe areas, SRT, ASS builder |
 | `vid_sfx.py` | whoosh mapping and synthesis, ambient segments and levels |
 | `vid_editorial.py` | editorial measurement (shot size, camera motion, saliency) and editorial lint - the 'why' of the cut |
+| `vid_cutlogic.py` | the named cut and its reason at every boundary, transitions within the budget, motion alignment |
+| `vid_filter.py` | what is never chosen and why: short / dark / blurry / shaky / covered / internal cut, same-moment groups, look-alikes |
+| `vid_story.py` | story-first selection: chapters, slots from the music, capacity-aware allocation, beam search, variants, cut-downs, audit |
+| `vid_moment.py` | the best segment inside a chosen clip (sharp, steady, the action peak, not a cut) |
+| `vid_profile.py` | remembered taste: bans, pins, favourites, capped biases, feedback rules, promotion to a global profile |
+| `vid_review.py` | the offline review page: frame strips, proxy videos, timeline, start-here, decisions export |
+| `vid_vision.py` | runs the optional vision plug-in (`plugins/vision`, separate process and environment) and reads its results |
+| `vid_camera.py` | camera colour matching from clips of two cameras filmed at the same time |
 | `vid_deliver.py` | delivery presets, size/bitrate targeting, render manifest, project bundle, cache GC |
 | `mh_video.py` | CLI |
 
@@ -54,7 +67,7 @@ heuristic signals (motion saliency, edge/entropy, colour) are enough for reframe
 ### Cut decisions (0.9-0.12)
 `vid_cutlogic.py` turns the per-shot measurements into a named cut and a one-sentence reason for every boundary, then applies the transition budget. Inputs: `score.json` fields (shot size, camera motion, point of interest, brightness, saturation, energy, picture hash, dominant hue, `local_motion`, `flux`), the music sections of `beats.json`, and the agent's `shot-notes.json`, which overrides the measurements. Output: `transitions`, `transition_frames` and `rationale` in the EDL (`cuts --write`, `plan --smart-transitions`), plus optional `src_start` alignments (`cuts --align`). The rules are explicit and tested; nothing is learned.
 
-**The honest ML boundary.** Pure-Python measurements can say *how big, how fast, which way, how bright, what colour, how alike*. They cannot say *who*, *what is happening*, *whether the gesture is finished* or *whether a face is turned toward the camera*. Those judgements are the agent's: it looks at the frames, writes `shot-notes.json`, and its notes win. Adding a vision model would break the zero-dependency, offline promise (see `SECURITY.md`), so it is deliberately not part of the engine.
+**The honest ML boundary.** Pure-Python measurements can say *how big, how fast, which way, how bright, what colour, how alike*. They cannot say *who*, *what is happening*, *whether the gesture is finished* or *whether a face is turned toward the camera*. Those judgements are the agent's: it looks at the frames, writes `shot-notes.json`, and its notes win. The engine itself stays standard-library only; face detection lives in an optional plug-in (`plugins/vision`) with its own virtual environment, started as a separate process and read back from `vision.json`, offline after a one-time install (and an optional 232 KB model checked by its SHA-256). Every signal from it carries its measured reliability (see `docs/CALIBRATION.md`), and measurements that failed against labelled real footage (the role and mood of a shot) were not built.
 
 ## Per-shot part chain (order matters)
 ```
@@ -79,14 +92,15 @@ Parts are cached by a hash of everything that influences them and live under `pa
 | `test_qa` | the quality gate on deliberately broken videos |
 | `test_color`, `test_motion`, `test_text`, `test_formats`, `test_sfx`, `test_phase4_integration` | the phase-4 capabilities, down to pixel checks, and one project that uses all of them in three formats |
 | `test_fuzz`, `test_hardening`, `test_capabilities`, `test_cli`, `test_repo` | malformed input, atomic writes and concurrency, Python-version compatibility, FFmpeg discovery, filter coverage, command line, documentation consistency |
+| `test_filter`, `test_moment`, `test_sequence`, `test_story`, `test_profile`, `test_deep_review`, `test_phase_a` ... `test_phase_f` | the selection: filters, moments, the beam search, feedback, the review page (logic run in Node), camera matching, cut-downs |
+| `test_eval_selection`, `test_fuzz_selection` | a synthetic library with a known truth and floors; a batch of random libraries and feedback that must keep every rule |
 | `run_tests.py`, `coverage_report.py` | runner with `--fast` and timings; standard-library line coverage (3.12+) |
 
-`engine/tools/gen_cli_doc.py` writes `docs/CLI.md` from the argument parser.
+`engine/tools/gen_cli_doc.py` writes `docs/CLI.md` from the argument parser. `engine/tools/eval_selection.py`, `fuzz_selection.py` and
+`calibrate_selection.py` measure the selection (synthetic truth, random rules, labelled real footage).
 
 ## Timing model
 All cut points are quantised to frames (`round(t * fps)`). A transition lasts 4 frames centred on the cut; a shot is padded by 2 frames only on the sides touching a transition. Assembled length is asserted equal to `round(duration * fps)` before encoding, and tests check random layouts.
 
-## Roadmap (phases)
-1. Foundation (v0.1). 2. Speed and accuracy (v0.2): cached probing, cheap effects, GPU decode, shot scoring, same-scene detection, beat validation. 3. Automated QA gate and effect audit (v0.3). 4. New capabilities (v0.4): colour correction and grading, stabilisation, slow motion, Persian text, 16:9 and 1:1, sound design, clip audio. 5. Hardening, documentation, Persian guide and CI (this version, v0.5).
-
-After phase 5 the next steps depend on use, not on the plan: run it on other machines and footage and fix what that finds.
+## Roadmap
+See `docs/ROADMAP.md` for the state, the arcs so far and what is next.
