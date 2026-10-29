@@ -20,9 +20,10 @@ NEEDS_FF = unittest.skipUnless(helpers.ffmpeg_available(), "ffmpeg not installed
 
 class Windows(unittest.TestCase):
     def test_the_proxy_starts_a_little_before_the_shot_and_stays_inside_the_clip(self):
-        self.assertEqual(vid_review.proxy_window(60.0, 20.0), (14.0, 24.0))
-        self.assertEqual(vid_review.proxy_window(60.0, 2.0), (0.0, 24.0))
-        self.assertEqual(vid_review.proxy_window(60.0, 59.0), (36.0, 24.0), "never past the end")
+        span, lead = vid_review.PROXY_SPAN, vid_review.PROXY_LEAD
+        self.assertEqual(vid_review.proxy_window(60.0, 20.0), (20.0 - lead, span))
+        self.assertEqual(vid_review.proxy_window(60.0, 2.0), (0.0, span))
+        self.assertEqual(vid_review.proxy_window(60.0, 59.0), (60.0 - span, span), "never past the end")
         self.assertEqual(vid_review.proxy_window(10.0, 5.0), (0.0, 10.0), "a short clip is held whole")
         self.assertEqual(vid_review.proxy_window(0, 0), (0.0, 0.0))
 

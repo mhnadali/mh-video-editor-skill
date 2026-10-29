@@ -74,7 +74,7 @@ mh_video sheets [-h] --work WORK [--size SIZE] [--cols COLS] [--rows ROWS] [--po
 Measure sharpness, exposure and motion of every clip; best window; same-scene hashes.
 
 ```
-mh_video score [-h] --work WORK [--workers WORKERS] [--limit LIMIT] [--rescore]
+mh_video score [-h] --work WORK [--workers WORKERS] [--limit LIMIT] [--rescore] [--min-duration MIN_DURATION]
 ```
 
 | Argument | Required / default | Meaning |
@@ -83,6 +83,7 @@ mh_video score [-h] --work WORK [--workers WORKERS] [--limit LIMIT] [--rescore]
 | `--workers WORKERS` |  | parallel workers (default: min(4, CPUs)) |
 | `--limit LIMIT` |  | measure only the first N clips |
 | `--rescore` |  | ignore earlier scores (default: reuse unchanged files) |
+| `--min-duration MIN_DURATION` |  | do not measure clips shorter than this many seconds (5 = the selection's rule; default: measure all) |
 
 ## `rank`
 

@@ -85,12 +85,23 @@ class Core(unittest.TestCase):
         exe = tmp / ".venv" / ("Scripts" if os.name == "nt" else "bin")
         exe.mkdir(parents=True, exist_ok=True)
         (exe / ("python.exe" if os.name == "nt" else "python")).write_text("x")
-        failed = subprocess.CompletedProcess([], 3, stdout="", stderr="no cascades")
+        import io
+
+        class Failed:                         # a plug-in process that prints a progress line and then fails
+            def __init__(self, *a, **k):
+                self.stdout = io.StringIO("vision: 1/2, about 1 s left\n")
+                self.stderr = io.StringIO("no cascades")
+
+            def wait(self):
+                return 3
+
+        seen = []
         with helpers_env(MH_VISION_PYTHON=None), mock.patch.object(vl, "find_ffmpeg", return_value={"ffmpeg": "FF"}), \
-                mock.patch.object(subprocess, "run", return_value=failed):
+                mock.patch.object(subprocess, "Popen", Failed):
             with self.assertRaises(vl.EngineError) as cm:
-                vv.run("W", plugin_dir=tmp, log=lambda *_: None)
+                vv.run("W", plugin_dir=tmp, log=seen.append)
         self.assertIn("no cascades", str(cm.exception))
+        self.assertIn("vision: 1/2, about 1 s left", seen, "progress is passed on while the plug-in runs")
 
     def test_the_cli_commands_exist(self):
         import mh_video

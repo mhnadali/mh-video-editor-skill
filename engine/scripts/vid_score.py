@@ -13,6 +13,7 @@ import os
 import re
 import subprocess
 import tempfile
+import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -305,10 +306,14 @@ def mark_similar(scores: list[dict], max_distance: int = 8) -> int:
 
 
 def score_inventory(records: list[dict], workers: int | None = None, limit: int | None = None,
-                    hw: bool | None = None, progress=None, previous: dict[str, dict] | None = None) -> list[dict]:
+                    hw: bool | None = None, progress=None, previous: dict[str, dict] | None = None,
+                    min_duration: float = 0.0) -> list[dict]:
     """Score every non-duplicate clip. `previous` = earlier score entries keyed by path: entries whose file is
-    unchanged (same size and mtime) are reused, so re-running after adding clips only measures the new ones."""
+    unchanged (same size and mtime) are reused, so re-running after adding clips only measures the new ones.
+    `min_duration` skips clips too short to ever be used (the selection never takes a clip under 5 s)."""
     recs = [r for r in records if r.get("dup_of") is None]       # exact duplicates are never candidates
+    if min_duration > 0:
+        recs = [r for r in recs if (r.get("duration") or 0.0) >= min_duration - 0.1]
     if limit:
         recs = recs[:limit]
     if hw is None:
@@ -317,6 +322,7 @@ def score_inventory(records: list[dict], workers: int | None = None, limit: int 
     previous = previous or {}
     done = 0
     reused = 0
+    began = time.monotonic()
 
     def one(r):
         nonlocal done, reused
@@ -331,7 +337,13 @@ def score_inventory(records: list[dict], workers: int | None = None, limit: int 
             out = score_clip(r, hw)
         done += 1
         if progress and done % 25 == 0:
-            progress(f"scored {done}/{len(recs)} ({reused} reused)")
+            measured = done - reused
+            left = ""
+            if measured >= 5:                         # time left from the clips that were really measured so far
+                per = (time.monotonic() - began) / measured
+                rest = (len(recs) - done) * per * (measured / done)
+                left = f", about {rest / 60:.0f} min left" if rest >= 60 else f", about {rest:.0f} s left"
+            progress(f"scored {done}/{len(recs)} ({reused} reused{left})")
         return out
 
     with ThreadPoolExecutor(workers or vl.cpu_workers(8)) as ex:

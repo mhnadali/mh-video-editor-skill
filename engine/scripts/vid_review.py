@@ -7,8 +7,9 @@ to a slot, and the music's energy is drawn against the energy of the chosen shot
 once. Decisions are saved in the browser as you go (so closing the page loses nothing) and 'Export decisions' downloads a
 `decisions.json` that `story feedback` applies: the storyboard changes and the engine remembers the taste (see vid_profile.py).
 
-The proxies live in a folder next to the page (`<page>_media/`, about 1 MB per clip: 240 p, no sound, at most 24 s around the shot);
-keep the page and the folder together. With `video=False` the page is one self-contained file.
+The proxies live in a folder next to the page (`<page>_media/`, about 50-100 KB per clip: 240 p, no sound, at most 14 s around the
+shot) and are reused when the page is made again (after `story feedback`, only new clips cost time); keep the page and the folder
+together. With `video=False` the page is one self-contained file.
 """
 from __future__ import annotations
 
@@ -25,8 +26,12 @@ import vidlib as vl
 
 FRAME = 140
 PROXY_HEIGHT = 240
-PROXY_SPAN = 24.0               # seconds of a clip that the proxy holds
-PROXY_LEAD = 6.0                # seconds before the shot that the proxy starts, so the start can be moved earlier
+PROXY_SPAN = 14.0               # seconds of a clip that the proxy holds (a shot is 1-3 s: room to move its start either way)
+PROXY_LEAD = 5.0                # seconds before the shot that the proxy starts, so the start can be moved earlier
+# decoding is all the cost of a proxy (4K sources): skipping the deblocking filter and the B-frames made it 21-32 % faster on
+# real iPhone (H.264) and Osmo (HEVC) clips. A proxy is only for choosing (240 p, about 10-15 distinct frames a second); the
+# measurements and the render always decode every frame properly.
+PROXY_DECODE = ["-skip_loop_filter", "all", "-skip_frame", "bidir"]
 
 
 def strip_for(rec: dict, workdir: Path, size: int = FRAME) -> list:
@@ -51,7 +56,9 @@ def make_proxy(rec: dict, dest: Path, offset: float, span: float) -> bool:
     """A small, silent H.264 copy of `span` seconds of the clip from `offset`; False if FFmpeg could not make it."""
     vf = (vid_sheets.TONEMAP_HLG if rec.get("hdr") else "") + f"scale=-2:{PROXY_HEIGHT},fps=15,format=yuv420p"
     dest.parent.mkdir(parents=True, exist_ok=True)
-    r = vl.run([vl.find_ffmpeg()["ffmpeg"], "-v", "error", "-y", "-threads", "2", "-ss", f"{offset:.2f}", "-t", f"{span:.2f}",
+    if dest.is_file() and dest.stat().st_size > 200:
+        return True                                   # made before with the same window (the name says so)
+    r = vl.run([vl.find_ffmpeg()["ffmpeg"], "-v", "error", "-y", "-threads", "2", *PROXY_DECODE, "-ss", f"{offset:.2f}", "-t", f"{span:.2f}",
                 "-i", rec["path"], "-an", "-vf", vf, "-c:v", "libx264", "-preset", "veryfast", "-crf", "30",
                 "-movflags", "+faststart", str(dest)], check=False)
     return r.returncode == 0 and dest.is_file() and dest.stat().st_size > 200
@@ -79,8 +86,9 @@ def build_data(sb: dict, inventory: list, scores: dict, workdir: Path, beats: Op
 
         def one(i):
             offset, span = proxy_window(by[i].get("duration"), start_of[i])
-            ok = make_proxy(by[i], media_dir / f"{i}.mp4", offset, span)
-            return i, ({"file": f"{media_url}{i}.mp4", "offset": offset} if ok else None)
+            name = f"{i}_{int(round(offset * 100))}_{int(round(span * 100))}.mp4"       # the window is in the name: reuse is safe
+            ok = make_proxy(by[i], media_dir / name, offset, span)
+            return i, ({"file": f"{media_url}{name}", "offset": offset} if ok else None)
 
         with ThreadPoolExecutor(max(1, min(workers, 4))) as ex:
             proxies = dict(ex.map(one, list(shown)))
