@@ -10,7 +10,9 @@ import vid_edl as ve
 import vidlib as vl
 
 ROOT = Path(__file__).resolve().parent.parent.parent
-MD_FILES = [p for p in ROOT.rglob("*.md") if ".git" not in p.parts]
+# the repository's own files: not .git and not the plug-ins' local environments and models (git-ignored, third-party)
+LOCAL_ONLY = {".git", ".venv", ".venv-content", "models", "__pycache__"}
+MD_FILES = [p for p in ROOT.rglob("*.md") if not LOCAL_ONLY & set(p.relative_to(ROOT).parts)]
 
 
 def frontmatter(path: Path) -> dict:
@@ -96,7 +98,7 @@ class Code(unittest.TestCase):
         """A stray backspace or form feed (from a mangled escape in a scripted edit) once ended up in a test and a doc."""
         bad = []
         for p in ROOT.rglob("*"):
-            if p.is_file() and p.suffix in {".py", ".md", ".json", ".yml", ".sh", ".ps1", ".txt"} and ".git" not in p.parts:
+            if p.is_file() and p.suffix in {".py", ".md", ".json", ".yml", ".sh", ".ps1", ".txt"} and not LOCAL_ONLY & set(p.relative_to(ROOT).parts):
                 data = p.read_bytes()
                 if any(b < 32 and b not in (9, 10, 13) for b in data):
                     bad.append(p.relative_to(ROOT).as_posix())

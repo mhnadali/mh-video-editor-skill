@@ -2,6 +2,21 @@
 
 All notable changes to this project. Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [SemVer](https://semver.org/).
 
+## [0.29.0] - 2026-10-29 (phase K: the content model)
+
+### Added
+- The optional content plug-in, set up only by `python plugins/vision/setup.py --content` (owner-approved): Google's SigLIP base
+  (Apache 2.0, ONNX export by Xenova, quantized, about 211 MB) from a pinned revision with every file checked against its SHA-256, in its
+  own environment (`.venv-content`: onnxruntime and tokenizers; Python 3.10-3.14). Offline after setup.
+- `content run` (three frames of every clip into content.json, cached) and `content search "words"`; `prepare` runs it when it is set up.
+- What the engine takes from it, each measured on the Kavir labels first: people (a "yes" counts like a sure face: precision 1.00 on two
+  label sets, against 0.82-0.83 for YuNet), shot size (74 % against 63 %), guessed role and mood for clips without notes (74 % and 67 %,
+  learned from the noted clips; `story hook` uses them with a discount and says so), and look-alike flags (cosine 0.94; never a drop,
+  since one different pair in twenty came out alike).
+
+### Not adopted
+- Deciding the same moment by the embeddings (precision 0.92 against the hashes' 1.0).
+
 ## [0.28.0] - 2026-10-29 (phase M: reliability)
 
 ### Added

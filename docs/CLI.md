@@ -29,6 +29,7 @@ Exit codes: 0 = success; 1 = a check failed (QA FAIL, lint errors, verify failed
 | [`sfx`](#sfx) | sound design and ambient bed |
 | [`audio`](#audio) | the footage's own sound: measure it, and a page to check it by ear |
 | [`music`](#music) | fit the music to the edit: end on the song's own ending |
+| [`content`](#content) | the optional content plug-in (SigLIP): what clips show, and search in words |
 | [`clean`](#clean) | what the work folder holds and, with --yes, delete what can be made again (old parts, proxies) |
 
 ## `doctor`
@@ -44,7 +45,7 @@ mh_video doctor [-h]
 From a footage folder and a song to the storyboard review page in one go (each step cached).
 
 ```
-mh_video prepare [-h] --footage FOOTAGE --music MUSIC --work WORK --duration DURATION [--chapters CHAPTERS] [--notes NOTES] [--variant {balanced,action,people}] [--recursive] [--utc-offset UTC_OFFSET] [--clock-shift DEVICE=MINUTES] [--no-drop] [--until {probe,score,vision,beats,audio,chapters,select,refine,review}]
+mh_video prepare [-h] --footage FOOTAGE --music MUSIC --work WORK --duration DURATION [--chapters CHAPTERS] [--notes NOTES] [--variant {balanced,action,people}] [--recursive] [--utc-offset UTC_OFFSET] [--clock-shift DEVICE=MINUTES] [--no-drop] [--until {probe,score,vision,content,beats,audio,chapters,select,refine,review}]
 ```
 
 | Argument | Required / default | Meaning |
@@ -60,7 +61,7 @@ mh_video prepare [-h] --footage FOOTAGE --music MUSIC --work WORK --duration DUR
 | `--utc-offset UTC_OFFSET` | default `3.5` | as in `probe`: hours added to a camera's UTC time (Iran 3.5) |
 | `--clock-shift DEVICE=MINUTES` |  | as in `probe` (default: the corrections the existing inventory was made with) |
 | `--no-drop` |  | do not start the beat-by-beat body at the music's drop |
-| `--until UNTIL` | one of `probe`, `score`, `vision`, `beats`, `audio`, `chapters`, `select`, `refine`, `review` | stop after this step |
+| `--until UNTIL` | one of `probe`, `score`, `vision`, `content`, `beats`, `audio`, `chapters`, `select`, `refine`, `review` | stop after this step |
 
 ## `probe`
 
@@ -749,6 +750,41 @@ mh_video music fit [-h] --beats BEATS [--duration DURATION] [--edl EDL] [--choos
 | `--preview PREVIEW` |  | folder: write a short audio file per candidate join to listen to |
 | `--write` |  | store the chosen join in the EDL (otherwise only print the table) |
 | `--top TOP` | default `6` | how many candidates to show (default 6) |
+
+## `content`
+
+The optional content plug-in (SigLIP): what clips show, and search in words.
+
+```
+mh_video content [-h] {run,search} ...
+```
+
+### `content run`
+
+Embed three frames of every clip (cached) into <work>/content.json.
+
+```
+mh_video content run [-h] --work WORK [--force]
+```
+
+| Argument | Required / default | Meaning |
+|---|---|---|
+| `--work WORK` | required | work folder (inventory, scores, sheets, beats live here) |
+| `--force` |  | embed every clip again |
+
+### `content search`
+
+The clips that best fit a description, e.g. "a car on a sand dune".
+
+```
+mh_video content search [-h] --work WORK [--top TOP] query
+```
+
+| Argument | Required / default | Meaning |
+|---|---|---|
+| `query` | required | a short description in English |
+| `--work WORK` | required | work folder (inventory, scores, sheets, beats live here) |
+| `--top TOP` | default `10` | how many clips to list (default 10) |
 
 ## `clean`
 

@@ -5,7 +5,7 @@ behind the MP4 export / size-reduction layer, and hand-off notes for continuing 
 
 ## State
 
-Version **0.28.0**. Standard-library Python over FFmpeg (plus an optional, separately installed vision plug-in), 830+ tests on
+Version **0.29.0**. Standard-library Python over FFmpeg (plus an optional, separately installed vision plug-in), 830+ tests on
 synthetic media, and since 0.17 every selection change is measured against a real trip (486 clips, three cameras, two days;
 numbers in `docs/CALIBRATION.md`).
 
@@ -26,7 +26,9 @@ offline review page, an evaluation harness; then a deep review that fixed twelve
   frame strips reused (a review rebuild 13.7 s -> 0.3 s).
 - **M, reliability (0.28):** QA measures the beat sync on the rendered sound (it would have caught the 0.23 % error), and
   `eval_real.py` re-measures a real project against a baseline (beats, same-moment and people labels, hook, sound, determinism).
-- Next: K content understanding, after the owner approves the model download; 1.0 on a second real project.
+- **K, the content model (0.29):** SigLIP in an optional plug-in (owner-approved download, pinned and checked): people, shot size,
+  guessed roles and moods, look-alike flags and search in words, each adopted only where it beat the measurement on the Kavir labels.
+- Next: 1.0 on a second real project with different footage.
 
 ## Real-footage arc (0.17 - 0.23, phases A - G)
 - **A, validation (0.17):** the picture hashes were one frame repeated (fixed, scores repaired in place); same-moment strictness

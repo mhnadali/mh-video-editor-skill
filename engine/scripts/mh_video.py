@@ -335,7 +335,7 @@ def inventory_shifts(inventory: list) -> list:
     return [f"{d}={v}" for d, v in sorted(known.items())]
 
 
-PREPARE_STEPS = ("probe", "score", "vision", "beats", "audio", "chapters", "select", "refine", "review")
+PREPARE_STEPS = ("probe", "score", "vision", "content", "beats", "audio", "chapters", "select", "refine", "review")
 
 
 def cmd_prepare(a) -> int:
@@ -393,6 +393,10 @@ def cmd_prepare(a) -> int:
     if run("vision", ["vision", "run", "--work", str(work)],
            None if vid_vision.plugin_python() else "the vision plug-in is not set up (python plugins/vision/setup.py)"):
         return finish("stopped after vision")
+    import vid_content
+    if run("content", ["content", "run", "--work", str(work)],
+           None if vid_content.content_python() else "the content plug-in is not set up (setup.py --content)"):
+        return finish("stopped after content")
     beats_path = work / "beats.json"
     music_fp = _fingerprint([a.music])
     old_beats = vl.load_json(beats_path) if beats_path.is_file() else None
@@ -441,6 +445,36 @@ def cmd_clean(a) -> int:
         return 0
     res = vid_deliver.clean_workspace(a.work, a.days)
     print(f"deleted {res['removed']} files, {res['freed_bytes'] / 1e6:.1f} MB")
+    return 0
+
+
+def merge_content(work, inv, scores, notes_path=None) -> int:
+    """The content plug-in's adopted readings onto the scores (nothing when it was never run)."""
+    import vid_content
+    import vid_story
+    content = vid_content.load(work, inv)
+    if not content["clips"]:
+        return 0
+    notes = vl.load_json(notes_path) if notes_path else None
+    by_path = vid_story.cl.notes_by_path(notes)
+    noted = {r["index"]: vid_story._note(by_path, r) for r in inv}                    # noqa: SLF001
+    return vid_content.merge_into_scores(scores, content, noted)
+
+
+def cmd_content(a) -> int:
+    import vid_content
+    import vid_probe
+    inv = vid_probe.load_inventory(a.work)
+    if a.action == "run":
+        c = vid_content.run(a.work, inv, force=a.force)
+        print(f"content: {len(c['clips'])} clips, {len(c['texts'])} texts in {Path(a.work) / vid_content.CONTENT_FILE}")
+        return 0
+    c = vid_content.run(a.work, inv, extra_texts=[a.query])                  # clips cached; only the new text is embedded
+    by = {r["index"]: r for r in inv}
+    for i, s in vid_content.search(c, c["texts"][a.query], top=a.top):
+        r = by.get(i) or {}
+        print(f"  clip {i:>4}  {s:.3f}  {str(r.get('taken') or '')[:16]:16}  {r.get('name', '')}")
+    print("look at them before using them (`sheets --only N --frames 3`): a search finds candidates, it does not judge")
     return 0
 
 
@@ -522,6 +556,7 @@ def cmd_story(a) -> int:
     inv = vid_probe.load_inventory(a.work)
     scores = vid_score.load_scores(a.work)
     vid_vision.merge_into_scores(scores, vid_vision.load(a.work))             # people and faces, if the plug-in was run
+    merge_content(a.work, inv, scores, getattr(a, "notes", None))             # people, shot size, guesses, if the content plug-in was run
     work = Path(a.work)
     if a.action == "chapters":
         cfg = vid_story.propose_chapters(inv, scores, a.gap)
@@ -993,6 +1028,14 @@ def build_parser() -> argparse.ArgumentParser:
     q.add_argument("--work", required=True); q.add_argument("--out", help="the page (default <work>/listen.html)")
     q.add_argument("--count", type=int, default=30, help="how many excerpts (default 30, spread over the measured labels)")
     p.set_defaults(fn=cmd_audio)
+    p = sub.add_parser("content", help="the optional content plug-in (SigLIP): what clips show, and search in words")
+    csub2 = p.add_subparsers(dest="action", required=True)
+    q = csub2.add_parser("run", help="embed three frames of every clip (cached) into <work>/content.json")
+    q.add_argument("--work", required=True); q.add_argument("--force", action="store_true", help="embed every clip again")
+    q = csub2.add_parser("search", help="the clips that best fit a description, e.g. \"a car on a sand dune\"")
+    q.add_argument("query", help="a short description in English"); q.add_argument("--work", required=True)
+    q.add_argument("--top", type=int, default=10, help="how many clips to list (default 10)")
+    p.set_defaults(fn=cmd_content)
     p = sub.add_parser("music", help="fit the music to the edit: end on the song's own ending")
     msub = p.add_subparsers(dest="action", required=True)
     q = msub.add_parser("fit", help="cut the music on a downbeat and go on at a later one so the song's own ending closes the video")
