@@ -5,7 +5,7 @@ behind the MP4 export / size-reduction layer, and hand-off notes for continuing 
 
 ## State
 
-Version **0.23.0**. Standard-library Python over FFmpeg (plus an optional, separately installed vision plug-in), 830+ tests on
+Version **0.24.0**. Standard-library Python over FFmpeg (plus an optional, separately installed vision plug-in), 830+ tests on
 synthetic media, and since 0.17 every selection change is measured against a real trip (486 clips, three cameras, two days;
 numbers in `docs/CALIBRATION.md`).
 
@@ -13,6 +13,12 @@ numbers in `docs/CALIBRATION.md`).
 Chapters and a storyboard the user approves before anything is planned; hard filters (nothing under 5 s), same-moment groups (only
 the best take), the best moment inside a clip, a beam search over the whole sequence with three variants, remembered taste, an
 offline review page, an evaluation harness; then a deep review that fixed twelve bugs.
+
+## Towards 1.0 (0.24 - 0.29, phases H - M)
+- **H, the picture (0.24):** 10-bit parts, a 16-bit assembly dithered once, every conversion in Rec.709 (colours exact; the old chain
+  was 1-2 levels dark), an optional 10-bit HEVC master. Banding and noise measured on all storyboard shots: no filter needed.
+- Next: I story, hook and a whole-storyboard preview with the music (0.25); J sound (0.26); K content understanding (0.27);
+  L workflow and speed (0.28); M reliability (0.29); 1.0 on a second real project.
 
 ## Real-footage arc (0.17 - 0.23, phases A - G)
 - **A, validation (0.17):** the picture hashes were one frame repeated (fixed, scores repaired in place); same-moment strictness

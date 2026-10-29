@@ -34,7 +34,7 @@ import vidlib as vl
 
 OV = 2 * ve.PAD
 MIN_PART_BYTES = 200          # a valid MP4 of a flat 15-frame shot can be under 1 KB: size is only a sanity check
-_ENC_CACHE: dict[str, bool] = {}
+_ENC_CACHE: dict = {}                       # encoder probes: {kind: bool, 'master': name or None}
 
 
 # --------------------------------------------------------------------------- encoder choice
@@ -69,6 +69,54 @@ def encoder_available(kind: str) -> bool:
             ok = False
     _ENC_CACHE[kind] = ok
     return ok
+
+
+# The optional master: the same edit as 10-bit HEVC (Main 10), for archiving and for platforms that take HEVC uploads. The
+# delivery file stays 8-bit H.264. Software x265 first (best quality per bit), then the GPU encoders that can do Main 10.
+MASTER_PIX_FMT = "yuv420p10le"
+MASTER_ENCODERS = {
+    "libx265": ["-c:v", "libx265", "-preset", "slow", "-x265-params", "log-level=error"],
+    "hevc_nvenc": ["-c:v", "hevc_nvenc", "-preset", "p6", "-profile:v", "main10", "-rc", "vbr", "-b:v", "0"],
+    "hevc_videotoolbox": ["-c:v", "hevc_videotoolbox", "-profile:v", "main10"],
+}
+MASTER_QUALITY = {"standard": {"crf": 18, "cq": 22, "q": 55}, "high": {"crf": 15, "cq": 18, "q": 65},
+                  "max": {"crf": 12, "cq": 15, "q": 75}}
+
+
+def master_encoder() -> str | None:
+    """The first HEVC encoder that really encodes 10-bit here (a 0.2 s null encode, cached), or None."""
+    if "master" in _ENC_CACHE:
+        return _ENC_CACHE["master"]
+    found = None
+    for name, args in MASTER_ENCODERS.items():
+        cmd = [vl.find_ffmpeg()["ffmpeg"], "-v", "error", "-f", "lavfi", "-i", "color=c=gray:s=256x256:d=0.2"] + args + \
+              ["-pix_fmt", "p010le" if name == "hevc_videotoolbox" else MASTER_PIX_FMT, "-f", "null", "-"]
+        try:
+            if vl.run(cmd, check=False, timeout=30).returncode == 0:
+                found = name
+                break
+        except Exception:
+            continue
+    _ENC_CACHE["master"] = found
+    return found
+
+
+def master_encoder_args(quality: str | None) -> tuple[list[str], str]:
+    name = master_encoder()
+    if not name:
+        raise vl.EngineError("no 10-bit HEVC encoder here (libx265, hevc_nvenc or hevc_videotoolbox) for --master; "
+                             "the FFmpeg builds from gyan.dev, BtbN, Homebrew and most Linux distributions include libx265")
+    mq = MASTER_QUALITY[quality if quality in MASTER_QUALITY else "high"]
+    args = list(MASTER_ENCODERS[name])
+    if name == "libx265":
+        args = args[:-2] + ["-crf", str(mq["crf"]), "-x265-params",
+                            "log-level=error:colorprim=bt709:transfer=bt709:colormatrix=bt709:range=limited"]
+    elif name == "hevc_nvenc":
+        args += ["-cq", str(mq["cq"])]
+    else:
+        args += ["-q:v", str(mq["q"])]
+    pix = "p010le" if name == "hevc_videotoolbox" else MASTER_PIX_FMT
+    return args + ["-tag:v", "hvc1", "-pix_fmt", pix], name
 
 
 def hw_encoders() -> dict:
@@ -119,6 +167,53 @@ def quality_settings(name: str | None) -> dict:
     if q not in QUALITY:
         raise vl.EngineError(f"unknown quality '{q}' (known: {', '.join(QUALITY)})")
     return QUALITY[q]
+
+
+# How a shot is stored between its own filters and the assembly. Final renders at high and max keep 10 bits (and HLG
+# sources their 10 bits); the assembly works in 16-bit YUV and dithers once to 8 bits. Measured on 7 real Kavir shots against
+# the same filters without any lossy step (docs/CALIBRATION.md, phase H): lossless FFV1 parts gave chroma PSNR +0.26 dB and
+# SSIM +0.12 dB over the old 8-bit parts but 9.7 times the disk; x264 10-bit at CRF 6 gave +0.17 / +0.10 at 1.9 times. So
+# `high` uses x264 10-bit (FFV1 if this libx264 has no 10-bit), `max` is lossless. Previews and `standard` stay light 8-bit.
+PRECISE_PARTS = {
+    "high": {"pix_fmt": "yuv420p10le", "ext": ".mp4", "args": ["-c:v", "libx264", "-preset", "veryfast", "-crf", "6"]},
+    "max": {"pix_fmt": "yuv420p10le", "ext": ".mkv", "args": ["-c:v", "ffv1", "-level", "3", "-slices", "16", "-g", "1"]},
+}
+LIGHT_PART = {"pix_fmt": "yuv420p", "ext": ".mp4"}
+PART_EXTS = (".mp4", ".mkv")
+# The precise assembly converts only with zscale and the Rec.709 matrix stated: FFmpeg's automatic conversions guess the matrix
+# from tags (an untagged or RGB frame becomes BT.601) and `fade` has no 16-bit RGB path, so it inserts one of those guesses
+# (measured: skin 227/187/140 came out 210/175/134). The picture stays in 16-bit YUV; RGB only for the screen-blended flare,
+# in 12 bits: FFmpeg's `blend` mixes up the green and blue planes of gbrp16le (screen over black turned 191/47/21 into 191/201/174).
+Z709 = "tin=709:pin=709:t=709:p=709"
+FLARE_RGB = "gbrp12le"
+YUV_TO_RGB = f"zscale=min=709:rin=tv:{Z709}:r=full,format={FLARE_RGB}"
+RGB_TO_YUV16 = f"zscale=rin=full:{Z709}:m=709:r=tv,format=yuv444p16le"
+TO_YUV16 = f"zscale=min=709:rin=tv:{Z709}:m=709:r=tv,format=yuv444p16le"
+FINAL_DITHER = f"zscale=min=709:rin=tv:{Z709}:m=709:r=tv:d=error_diffusion,"       # once, to 8 bits, by error diffusion
+
+
+def precise_parts(quality: str | None, preview: bool = False) -> bool:
+    return not preview and (quality or "standard") in ("high", "max")
+
+
+def x264_10bit() -> bool:
+    """Does this libx264 encode 10-bit (every build since 2019 does both depths; older ones were 8-bit only)? Cached."""
+    if "x264_10bit" not in _ENC_CACHE:
+        cmd = [vl.find_ffmpeg()["ffmpeg"], "-v", "error", "-f", "lavfi", "-i", "color=c=gray:s=64x64:d=0.1", "-c:v", "libx264",
+               "-pix_fmt", "yuv420p10le", "-f", "null", "-"]
+        try:
+            _ENC_CACHE["x264_10bit"] = vl.run(cmd, check=False, timeout=30).returncode == 0
+        except Exception:
+            _ENC_CACHE["x264_10bit"] = False
+    return _ENC_CACHE["x264_10bit"]
+
+
+def part_encoding(quality: str | None, preview: bool = False) -> dict:
+    """pix_fmt, file extension and encoder arguments of the cached parts."""
+    if precise_parts(quality, preview):
+        q = quality if quality == "max" or x264_10bit() else "max"
+        return dict(PRECISE_PARTS[q], args=list(PRECISE_PARTS[q]["args"]))
+    return dict(LIGHT_PART, args=["-c:v", "libx264", "-preset", "veryfast", "-crf", str(quality_settings(quality)["part_crf"])])
 
 
 def encoder_args(pref: str, preview: bool, bitrate_kbps: int | None = None, maxrate_kbps: int | None = None,
@@ -242,7 +337,10 @@ def part_front(pl: dict, hdr: bool, src_fps: float = 30.0) -> str:
     """Everything up to and including the reframe: the geometry the stabiliser must see in both passes."""
     parts: list[str] = []
     if hdr:
-        parts.append(vid_sheets.tonemap_chain(pl.get("tonemap")).rstrip(","))
+        tm = vid_sheets.tonemap_chain(pl.get("tonemap")).rstrip(",")
+        if (pl.get("pix_fmt") or "yuv420p") != "yuv420p":
+            tm = tm.replace("format=yuv420p", "format=yuv420p10le")      # a precise part keeps the HLG source's 10 bits
+        parts.append(tm)
     out_seconds = pl["n"] / pl["fps"]
     if pl.get("speed"):
         parts += vid_motion.retime_chain(pl["speed"], out_seconds, pl["fps"], src_fps, pl.get("speed_mode", "auto"))
@@ -273,8 +371,9 @@ def part_vf(pl: dict, hdr: bool, src_fps: float = 30.0) -> str:
         parts.append(pl["grade"])
     if pl.get("split"):
         a, b = pl["split"]
-        parts.append(f"format=gbrp,rgbashift=rh=-12:bh=12:rv=4:bv=-4:enable='between(n,{a},{b})'")
-    parts.append("format=yuv420p")
+        rgb = "gbrp" if (pl.get("pix_fmt") or "yuv420p") == "yuv420p" else "gbrp16le"
+        parts.append(f"format={rgb},rgbashift=rh=-12:bh=12:rv=4:bv=-4:enable='between(n,{a},{b})'")
+    parts.append(f"format={pl.get('pix_fmt') or 'yuv420p'}")
     parts.append("tpad=stop_mode=clone:stop=-1")
     return ",".join(x for x in parts if x)
 
@@ -339,7 +438,21 @@ def cached_media_ok(path: Path, seconds: float, tolerance: float, video: bool = 
         return False
     if video and not info.get("has_video"):
         return False
-    return abs((info.get("duration") or 0.0) - seconds) <= tolerance
+    if abs((info.get("duration") or 0.0) - seconds) > tolerance:
+        return False
+    if path.suffix.lower() == ".mkv":          # Matroska writes its duration up front: a cut-off file still claims all of it
+        return mkv_frames(path) / (info.get("fps") or 30.0) >= seconds - tolerance
+    return True
+
+
+def mkv_frames(path: Path) -> int:
+    """Video packets really present in a Matroska file (read, not decoded; FFV1 parts are one frame per packet)."""
+    r = vl.run([vl.find_ffmpeg()["ffprobe"], "-v", "error", "-select_streams", "v:0", "-count_packets", "-show_entries",
+                "stream=nb_read_packets", "-of", "csv=p=0", vl.ffp(path)], check=False)
+    try:
+        return int((r.stdout or "").strip().rstrip(",") or 0)
+    except ValueError:
+        return 0
 
 
 def _cache_key(cmd: list[str], clip: str) -> str:
@@ -372,17 +485,22 @@ def render_part(edl: dict, j: int, bounds: list[int], trans: dict[int, str], sca
         tag = hashlib.sha1(json.dumps([front, pl["stab"], round(st, 3), pl["n"], stat.st_size, int(stat.st_mtime)],
                                       sort_keys=True).encode()).hexdigest()[:12]
         pl["trf"] = str(workdir / f"{j:03d}_{tag}.trf")
+    enc = part_encoding(quality)
+    pl["pix_fmt"] = enc["pix_fmt"]
     vf = part_vf(pl, hdr, src_fps)
     cmd = [ff, "-v", "error", "-y"] + hw + ["-ss", f"{st:.3f}", "-i", pl["clip"], "-an",
-           "-frames:v", str(pl["n"]), "-vf", vf, "-c:v", "libx264", "-preset", "veryfast",
-           "-crf", str(quality_settings(quality)["part_crf"]),
-           "-r", str(pl["fps"]), "-pix_fmt", "yuv420p"]
+           "-frames:v", str(pl["n"]), "-vf", vf] + enc["args"] + ["-r", str(pl["fps"]), "-pix_fmt", enc["pix_fmt"]]
     key = _cache_key([c for c in cmd[1:] if c not in hw], pl["clip"])      # same cache entry with or without GPU decode
-    out = workdir / f"{j:03d}_{key}.mp4"
+    out = workdir / f"{j:03d}_{key}{enc['ext']}"
     if use_cache and out.is_file() and cached_media_ok(out, pl["n"] / pl["fps"], 3.0 / pl["fps"] + 0.05):
+        try:
+            os.utime(out)                      # "used recently" for vid_deliver.gc_cache, which goes by modification time
+        except OSError:
+            pass
         return {"j": j, "path": out, "n": pl["n"], "cached": True}
-    for stale in workdir.glob(f"{j:03d}_*.mp4"):
-        stale.unlink(missing_ok=True)
+    for stale in workdir.glob(f"{j:03d}_*"):
+        if stale.suffix.lower() in PART_EXTS:
+            stale.unlink(missing_ok=True)
     if pl["stab"] and not Path(pl["trf"]).is_file():
         det = [ff, "-v", "error", "-y"] + hw + ["-ss", f"{st:.3f}", "-i", pl["clip"], "-an", "-frames:v", str(pl["n"]),
                                                 "-vf", f"{part_front(pl, hdr, src_fps)},{vid_motion.stab_detect_filter(pl['stab'], pl['trf'])}",
@@ -392,7 +510,7 @@ def render_part(edl: dict, j: int, bounds: list[int], trans: dict[int, str], sca
             r0 = vl.run([c for c in det if c not in hw], check=False)
         if r0.returncode != 0 or not Path(pl["trf"]).is_file():
             raise vl.EngineError(f"shot {j}: stabilisation analysis failed: {(r0.stderr or '')[-300:]}")
-    tmp = out.with_suffix(".tmp.mp4")
+    tmp = out.with_suffix(".tmp" + enc["ext"])
     r = vl.run(cmd + [tmp], check=False)
     if (r.returncode != 0 or not tmp.is_file() or tmp.stat().st_size < MIN_PART_BYTES) and hw:
         sw = [c for c in cmd if c not in hw]                                 # GPU decode failed: retry in software
@@ -413,8 +531,10 @@ def audio_lines(edl: dict, music_idx: int, plan: dict | None = None) -> list[str
     style = ve.merged_style(edl)
     dur = p["duration"]
     mfi, mfo = p["music_fade_in"], p["music_fade_out"]
-    lines = [f"[{music_idx}:a]afade=t=in:st=0:d={mfi},afade=t=out:st={max(0, dur - mfo - 0.1):.3f}:d={mfo},"
-             f"aformat=sample_rates=44100:channel_layouts=stereo[mus]"]
+    # afade, like fade, reads d=0 as its default length (one second of samples): a 0 s music fade is left out
+    mf = "".join(f + "," for f in ((f"afade=t=in:st=0:d={mfi}" if mfi > 0 else ""),
+                                  (f"afade=t=out:st={max(0, dur - mfo - 0.1):.3f}:d={mfo}" if mfo > 0 else "")) if f)
+    lines = [f"[{music_idx}:a]{mf}aformat=sample_rates=44100:channel_layouts=stereo[mus]"]
     mus = "[mus]"
     plan = plan or {}
     if plan.get("whoosh_lines"):
@@ -555,8 +675,10 @@ def master_audio(edl: dict, work: Path, log=vl.say, bounds: list[int] | None = N
 
 def build_graph(edl: dict, parts: list[dict], bounds: list[int], trans: dict[int, str], scale: float,
                 audio_master: str | None = None, size: tuple[int, int] | None = None,
-                text_filter: str | None = None) -> tuple[list[str], list[str]]:
-    """Return (filter lines, extra input args). Inputs: parts 0..N-1, then music (or the mastered wav), then optional flare source."""
+                text_filter: str | None = None, precise: bool = False, master: bool = False) -> tuple[list[str], list[str]]:
+    """Return (filter lines, extra input args). Inputs: parts 0..N-1, then music (or the mastered wav), then optional flare source.
+    `precise`: the parts are 10-bit, the picture stays in 16-bit RGB and is dithered once to 8 bits. `master`: [vout] is the
+    same picture in 10-bit 4:2:0, for the HEVC master."""
     p = ve.project(edl)
     style = ve.merged_style(edl)
     fps = p["fps"]
@@ -586,9 +708,13 @@ def build_graph(edl: dict, parts: list[dict], bounds: list[int], trans: dict[int
         music_idx = nin
         nin += 1
     flare_idx = None
-    lines.append(f"[{cur}]format=gbrp[v0]")
+    flare = style["end_flare"] and len(parts) >= 3
+    if precise:
+        lines.append(f"[{cur}]{YUV_TO_RGB if flare else TO_YUV16}[v0]")
+    else:
+        lines.append(f"[{cur}]format=gbrp[v0]")
     cur = "v0"
-    if style["end_flare"] and len(parts) >= 3:
+    if flare:
         flare_idx = nin
         nin += 1
         ft = style.get("flare_time")
@@ -596,15 +722,28 @@ def build_graph(edl: dict, parts: list[dict], bounds: list[int], trans: dict[int
             ft = bounds[-2] / fps + 0.3
         # the source fades up from black to a peak at `ft` and back to black: screen-blending black changes nothing,
         # so the flare only shows inside its window, using FFmpeg's fast built-in blend (an expression blend was 10x slower)
-        lines.append(f"[{flare_idx}:v]format=gbrp,fade=t=in:st={max(0.0, ft - 0.6):.3f}:d=0.6,fade=t=out:st={ft:.3f}:d=0.6[leak]")
-        lines.append(f"[{cur}][leak]blend=all_mode=screen:all_opacity=0.6[v1]")
+        lines.append(f"[{flare_idx}:v]format=gbrp,fade=t=in:st={max(0.0, ft - 0.6):.3f}:d=0.6,fade=t=out:st={ft:.3f}:d=0.6"
+                     f"{',format=' + FLARE_RGB if precise else ''}[leak]")
+        lines.append(f"[{cur}][leak]blend=all_mode=screen:all_opacity=0.6{',' + RGB_TO_YUV16 if precise else ''}[v1]")
         cur = "v1"
     fi, fo = p["fade_in"], p["fade_out"]
     dur = p["duration"]
+    deep = precise
     if text_filter:                                  # text sits under the final fades, so it fades with the picture
-        lines.append(f"[{cur}]format=yuv420p,{text_filter}[vtxt]")
+        lines.append(f"[{cur}]{FINAL_DITHER if precise else ''}format=yuv420p,{text_filter}[vtxt]")
         cur = "vtxt"
-    lines.append(f"[{cur}]fade=t=in:st=0:d={fi},fade=t=out:st={dur - fo:.3f}:d={fo},format=yuv420p[vout]")
+        deep = False                                 # the subtitle renderer draws on 8-bit frames: dithered before it, once
+    # FFmpeg's fade reads d=0 as "the default 25 frames", so a fade of 0 seconds is left out rather than written as d=0
+    fades = ",".join(f for f in ((f"fade=t=in:st=0:d={fi}" if fi > 0 else ""),
+                                 (f"fade=t=out:st={dur - fo:.3f}:d={fo}" if fo > 0 else "")) if f) or "null"
+    if master and deep:
+        lines.append(f"[{cur}]{fades},{FINAL_DITHER}format={MASTER_PIX_FMT}[vout]")
+    elif master:
+        lines.append(f"[{cur}]{fades},format={MASTER_PIX_FMT}[vout]")
+    elif deep:
+        lines.append(f"[{cur}]{fades},{FINAL_DITHER}format=yuv420p[vout]")
+    else:
+        lines.append(f"[{cur}]{fades},format=yuv420p[vout]")
     if music:
         if audio_master:
             lines.append(f"[{music_idx}:a]anull[aout]")                       # already mixed and mastered (master_audio)
@@ -659,7 +798,7 @@ def render(edl_path: str | os.PathLike, out: str | os.PathLike | None = None, pr
            force: bool = False, workers: int | None = None, log=vl.say, hwdecode: str = "auto",
            qa: bool = False, fmt: str | None = None, delivery: str | None = None, target_size_mb: float | None = None,
            bitrate: int | None = None, manifest: bool = False, bundle: bool = False,
-           json_out: str | os.PathLike | None = None, quality: str | None = None) -> dict:
+           json_out: str | os.PathLike | None = None, quality: str | None = None, master: bool = False) -> dict:
     t_start = time.time()
     edl = ve.load(edl_path)
     issues = ve.lint(edl)
@@ -683,6 +822,10 @@ def render(edl_path: str | os.PathLike, out: str | os.PathLike | None = None, pr
     scale = 0.5 if preview else 1.0
     quality = "standard" if preview else (quality or p.get("quality") or "high")       # previews stay light; finals are high
     qs = quality_settings(quality)
+    precise = precise_parts(quality, preview)
+    if master and preview:
+        raise vl.EngineError("--master is a final render (it keeps the full picture); leave out --preview")
+    master_args = master_encoder_args(quality) if master else None          # fail before the parts are rendered
     base = Path(edl_path).resolve().parent
     work = Path(workdir) if workdir else base / (Path(edl_path).stem + "_work")
     music_path = resolve_music(edl, work)
@@ -710,13 +853,14 @@ def render(edl_path: str | os.PathLike, out: str | os.PathLike | None = None, pr
         parts = [parts_by_j[j] for j in range(n)]
     cached = sum(1 for x in parts if x["cached"])
     parts_seconds = round(time.time() - t_parts, 1)
-    master = master_audio(edl, work, log, bounds, trans)
+    mastered = master_audio(edl, work, log, bounds, trans)
     text_filter = None
     if edl.get("texts"):
         ass, fonts = vid_text.build_ass(edl, size[0], size[1], work / "text" / (tag or "main"))
         text_filter = vid_text.text_filter(ass, fonts)
-    lines, extra = build_graph(edl, parts, bounds, trans, scale, audio_master=vl.ffp(master) if master else None, size=size,
-                               text_filter=text_filter)
+    audio_wav = vl.ffp(mastered) if mastered else None
+    lines, extra = build_graph(edl, parts, bounds, trans, scale, audio_master=audio_wav, size=size,
+                               text_filter=text_filter, precise=precise)
     graph_file = work / (("graph_preview" if preview else "graph") + (f"_{tag}" if tag else "") + ".txt")
     graph_file.write_text(";\n".join(lines), encoding="utf-8")
     video_kbps = None
@@ -728,16 +872,18 @@ def render(edl_path: str | os.PathLike, out: str | os.PathLike | None = None, pr
     out_path = Path(out) if out else base / f"{p.get('name', 'video')}{'_' + tag if tag else ''}{'_preview' if preview else ''}.mp4"
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
-    def assemble(enc_args: list[str], target: str | os.PathLike, map_audio: bool, to_null: bool = False) -> "object":
+    def assemble(enc_args: list[str], target: str | os.PathLike, map_audio: bool, to_null: bool = False,
+                 graph: Path | None = None, inputs: list | None = None) -> "object":
         cmd = [vl.find_ffmpeg()["ffmpeg"], "-v", "error", "-y"]
         for x in parts:
             cmd += ["-i", vl.ffp(x["path"])]
-        cmd += extra + [vl.filter_script_flag(), vl.ffp(graph_file), "-map", "[vout]"]
+        cmd += (extra if inputs is None else inputs) + [vl.filter_script_flag(), vl.ffp(graph or graph_file), "-map", "[vout]"]
         if map_audio and p.get("music"):
             cmd += ["-map", "[aout]", "-c:a", "aac", "-b:a", f"{vid_deliver.AUDIO_KBPS if video_kbps else qs['audio_kbps']}k"]
         elif not map_audio:
             cmd += ["-an"]
-        cmd += enc_args + ["-pix_fmt", vid_deliver.PIX_FMT, "-r", str(p["fps"]), "-t", f"{p['duration']:.3f}"]
+        pix = [] if "-pix_fmt" in enc_args else ["-pix_fmt", vid_deliver.PIX_FMT]
+        cmd += enc_args + pix + ["-r", str(p["fps"]), "-t", f"{p['duration']:.3f}"]
         if to_null:
             cmd += ["-f", "null", "-"]
         else:
@@ -761,6 +907,17 @@ def render(edl_path: str | os.PathLike, out: str | os.PathLike | None = None, pr
     assemble_seconds = round(time.time() - t_asm, 1)
     if r.returncode != 0:
         raise vl.EngineError(f"assembly failed (exit {r.returncode}):\n{(r.stderr or '')[-1200:]}")
+    master_out = None
+    if master_args:
+        log(f"writing the 10-bit HEVC master ({master_args[1]}) ...")
+        mlines, mextra = build_graph(edl, parts, bounds, trans, scale, audio_master=audio_wav, size=size,
+                                     text_filter=text_filter, precise=precise, master=True)
+        mgraph = work / (f"graph_master{'_' + tag if tag else ''}.txt")
+        mgraph.write_text(";\n".join(mlines), encoding="utf-8")
+        master_out = out_path.with_name(out_path.stem + "_master.mp4")
+        rm = assemble(master_args[0], master_out, map_audio=True, graph=mgraph, inputs=mextra)
+        if rm.returncode != 0:
+            raise vl.EngineError(f"the HEVC master failed (exit {rm.returncode}):\n{(rm.stderr or '')[-1200:]}")
     qa_report = None
     if qa:
         import vid_qa
@@ -771,7 +928,11 @@ def render(edl_path: str | os.PathLike, out: str | os.PathLike | None = None, pr
     result = {"out": str(out_path), "shots": n, "qa": qa_report["verdict"] if qa_report else None, "parts_cached": cached, "encoder": enc_name,
               "frames": vl.frames(p["duration"], p["fps"]), "seconds": round(time.time() - t_start, 1),
               "parts_seconds": parts_seconds, "assemble_seconds": assemble_seconds,
-              "preview": preview, "quality": quality, "workdir": str(work), "format": fmt, "size": list(size), "size_mb": round((info.get("size") or 0) / 1e6, 2)}
+              "preview": preview, "quality": quality, "workdir": str(work), "format": fmt, "size": list(size), "size_mb": round((info.get("size") or 0) / 1e6, 2),
+              "parts": (("10-bit lossless" if "ffv1" in part_encoding(quality)["args"] else "10-bit") if precise else "8-bit"), "parts_mb": round(sum(Path(x["path"]).stat().st_size for x in parts) / 1e6, 1)}
+    if master_out:
+        result["master"] = str(master_out)
+        result["master_mb"] = round(master_out.stat().st_size / 1e6, 2)
     if delivery or target_size_mb:
         result["delivery_check"] = vid_deliver.verify_delivery(info, float(target_size_mb) if target_size_mb else None, delivery)
     if manifest:

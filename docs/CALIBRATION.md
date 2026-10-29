@@ -71,3 +71,21 @@ duplicate. Put the settings you adopt in `chapters.json` under `dedupe` (`hash_b
 - **Per clip, roughly:** `score` 1 s, `vision run` (YuNet) 0.7 s, a review proxy 2.2 s (shown clips only), `story refine` 4 s
   (chosen clips only, cached). A 1000-clip library: about 17 minutes of scoring, 12 of vision, a few for review and refine.
   `score --min-duration 5` skips the clips the selection never uses (11 % of this trip).
+
+## Phase H measurements (same trip): the picture
+- **Colour through the chain.** Flat Rec.709 patches (red-orange, green, blue, skin) through a whole edit (cross-fade, concat, flare,
+  fades) and back to RGB: the old 8-bit chain came out 1-2 levels darker on every channel; the precise chain comes out exact (0 levels).
+  A first precise version was wrong by up to 16 levels: FFmpeg's `fade` has no 16-bit RGB path and its automatic conversion guessed
+  the BT.601 matrix, and `blend` mixes up the green and blue planes of `gbrp16le`. Every conversion now goes through zscale with
+  the Rec.709 matrix stated (`test_phase_h.Colour` checks it).
+- **Loss against the same shot without any lossy step**, 7 real shots (Osmo 10-bit, iPhone 17, iPhone 15 HLG, night), final at
+  `high`: the old 8-bit parts are the baseline; lossless FFV1 parts gave SSIM +0.12 dB, chroma PSNR +0.29 / +0.23 dB, at 9.7 times
+  the disk (341 MB of parts for 8 s) and 8 % more time; x264 10-bit CRF 6 gave +0.10 dB, +0.19 / +0.14 dB at 1.9 times the disk;
+  CRF 10 +0.08 / +0.11 / +0.06 at 1.15 times. Luma barely moves (+0.03 dB): the loss that remains is the delivery encode itself
+  (CRF 16 on noisy footage). Adopted: x264 10-bit CRF 6 for `high`, lossless FFV1 for `max`; the delivery file is 2 % smaller.
+- **Banding and noise do not need a filter on this trip.** All 35 storyboard shots at delivery size: CAMBI (libvmaf, under 5 barely
+  visible) mean 0.85, only 2 shots reach 5 (5.2 and 5.7, iPhone skies); the HLG shot fell from 2.1 to 1.2 with the precise chain.
+  Noise (Immerkaer, edges left out) median 1.1 levels; the highest values are sand texture in daylight action shots, not noise (the
+  night shots are low: the phones denoise them). So no automatic deband or denoise was built.
+- **A fade of 0 s faded in over 25 frames** (FFmpeg reads `fade d=0` as its default length; `afade d=0` as one second): found by these
+  measurements, fixed.

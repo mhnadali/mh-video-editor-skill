@@ -414,7 +414,7 @@ mh_video lint [-h] [--no-files] edl
 Render the video (cached parts; --preview for half size).
 
 ```
-mh_video render [-h] [--out OUT] [--preview] [--encoder {auto,libx264,nvenc,videotoolbox,qsv}] [--work WORK] [--no-cache] [--force] [--workers WORKERS] [--hwdecode {auto,none}] [--qa] [--format FORMAT] [--all-formats] [--delivery {reels,tiktok,shorts,stories,youtube,square}] [--target-size-mb TARGET_SIZE_MB] [--bitrate BITRATE] [--manifest] [--bundle] [--json JSON] [--quality {standard,high,max}] edl
+mh_video render [-h] [--out OUT] [--preview] [--encoder {auto,libx264,nvenc,videotoolbox,qsv}] [--work WORK] [--no-cache] [--force] [--workers WORKERS] [--hwdecode {auto,none}] [--qa] [--format FORMAT] [--all-formats] [--delivery {reels,tiktok,shorts,stories,youtube,square}] [--target-size-mb TARGET_SIZE_MB] [--bitrate BITRATE] [--manifest] [--bundle] [--json JSON] [--quality {standard,high,max}] [--master] edl
 ```
 
 | Argument | Required / default | Meaning |
@@ -438,6 +438,7 @@ mh_video render [-h] [--out OUT] [--preview] [--encoder {auto,libx264,nvenc,vide
 | `--bundle` |  | zip the EDL, brief, beats and scores for hand-off (no media) |
 | `--json JSON` |  | also write the render result (paths, sizes, verdict) to this JSON file |
 | `--quality QUALITY` | one of `standard`, `high`, `max` | constant-quality level of a final render: high (default) is close to the source, max is near lossless, standard is lighter; previews are always standard |
+| `--master` |  | also write <name>_master.mp4: the same edit as 10-bit HEVC (Main 10) for archiving or HEVC uploads (needs libx265 or a GPU HEVC encoder) |
 
 ## `qa`
 

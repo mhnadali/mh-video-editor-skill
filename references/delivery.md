@@ -31,6 +31,14 @@ authored a custom size, `--format` still overrides the preset's format.
 
 The render result carries a `delivery_check` (size within tolerance, aspect, container) so automation can gate on it.
 
+## 10-bit HEVC master
+
+`render EDL --master` also writes `<name>_master.mp4`: the same edit (same picture, same mastered sound) as 10-bit HEVC
+(Main 10, tagged `hvc1` so Apple players and Instagram accept it). Use it to archive the edit, or upload it where a platform takes
+HEVC. The delivery file next to it stays 8-bit H.264, which plays everywhere. The encoder is libx265 (CRF 15 at `high`, 12 at
+`max`), else `hevc_nvenc` or `hevc_videotoolbox`; `doctor` says which one this machine has, and `--master` stops before rendering
+if there is none. A master is a final render: `--preview --master` is refused.
+
 ## Multi-track music (music sections)
 
 `project.music` may be a **list** of audio files instead of one. They are concatenated (equal-loudness) into one track
