@@ -2,6 +2,23 @@
 
 All notable changes to this project. Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [SemVer](https://semver.org/).
 
+## [0.23.1] - 2026-10-29 (audit of 0.17 - 0.23 on the real pipeline)
+Every claim of 0.17.0 - 0.23.0 was checked against the code, the command line and the documents (86 checks), then the whole new workflow ran end to end on the real Kavir project (score, vision, select, refine, review decisions, feedback, refine again, cut-down, plan with smart transitions and stabilisation, camera match, colour plan, lint, audit, a preview render with QA 100/100, the camera gains measured in the rendered picture). The interactions it found are fixed, each with a test (`test_interactions.py`).
+
+### Fixed
+- **`story refine` moved a start the user had chosen on the review page** (8.67 s back to 7.17 s on a real clip); starts chosen by the user or carried over by a cut-down are now kept (the clip is still analysed).
+- **A chosen start was forgotten by the next `story select`.** It is now remembered in `profile.json` (`starts`) and pins its clip; promoting taste does not carry starts.
+- **`color plan --write` skipped every shot whose camera had been matched** (15 of 35 real shots got no exposure correction, although the documented order is `color cameras` first); a correction that is only the camera gain no longer counts, and the count reports real changes only.
+- **`score --min-duration` erased the earlier measurements of short clips**, which moved every clip's energy and sound percentiles; they are now kept (only new short clips are not measured), and a short clip is reported as `short`, not also `not-scored`.
+- **`story audit` reported trip-order inversions inside chapters ordered by energy** (6 false warnings on the real edit).
+- **Shot-size warnings rested on a 63 % guess:** runs of measured (not noted) sizes are now a single note from four shots on and cost no QA points; in the sequence search a measured same-size pair costs half (7 false warnings on the real edit without notes).
+- **"Looks like slot N" notes** of a slot whose clip was replaced are cleared.
+- **Storyboards after a new `probe`:** `refine`, `review` and `--cut-from` find their clips again by path; `story feedback` refuses decisions made on old clip numbers.
+- **Documents:** the skill and the agent now mention `color cameras`, cut-downs, `--stabilize-shaky` and the YuNet model (the agent would not have used them); the roadmap no longer lists the first Release as to do.
+
+### Added
+- `fuzz_selection.py` also checks cut-downs (only approved shots, at approved starts) and remembered starts, and computes capacity with the engine's own rules; 3000 random selections and 1000 feedback sequences pass.
+
 ## [0.23.0] - 2026-10-29 (phase G: engineering)
 ### Added
 - **`engine/tools/fuzz_selection.py`:** the randomized rule check from the deep review is now a tool (random libraries, chapters, profiles, lengths, variants and feedback against twelve rules); `test_fuzz_selection.py` runs a batch on every test run and checks that the checker catches planted violations. 300 random selections and 100 feedback sequences pass.

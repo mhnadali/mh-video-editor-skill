@@ -28,8 +28,8 @@ offline review page, an evaluation harness; then a deep review that fixed twelve
 - **G, engineering (0.23):** the randomized rule check is a tool and a test; these documents brought up to date.
 
 ## Next
-- **Decisions that are the owner's:** branch protection on `main`, the first tagged GitHub Release (the tag-driven workflow
-  exists), whether the repository stays public, an FFmpeg-version matrix and a macOS runner in CI (both need a trusted FFmpeg
+- **Decisions that are the owner's:** branch protection on `main`, whether the repository stays public (every pushed `v*`
+  tag already publishes a GitHub Release through `release.yml`, since 0.15.0), an FFmpeg-version matrix and a macOS runner in CI (both need a trusted FFmpeg
   source; the Actions policy blocks third-party setup actions).
 - **1.0** when the pipeline has run end to end on a second real project with different footage without a serious problem, and the
   calibration numbers hold there (one trip cannot prove a threshold).
@@ -101,7 +101,7 @@ that leaves less than 120 kbit/s for the picture is refused with a clear message
   repo's Actions policy blocks the third-party `setup-ffmpeg` action. Remaining: a first green CI run observed on GitHub,
   branch protection, an FFmpeg-version matrix in CI, and a workable macOS CI ffmpeg source.
 - **7 — Onboarding & distribution.** A zero-footage sample project (`engine/tools/make_sample.py`), a quickstart in the
-  README, and a tag-driven release workflow. Remaining: the first tagged GitHub Release.
+  README, and a tag-driven release workflow (it has published a Release for every tag since 0.15.0).
 - **8 — Export & delivery.** Done (above).
 - **9 — Editing intelligence.** An evaluation harness (`engine/tools/eval_quality.py`) reports beat error, pick diversity
   and restraint on a fixed synthetic corpus, so changes are judged by numbers. `beats --bpm/--first-beat/--beats-per-bar`

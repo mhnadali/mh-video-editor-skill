@@ -345,6 +345,9 @@ def cmd_story(a) -> int:
     if a.action == "refine":
         import vid_moment
         sb = vl.load_json(a.storyboard)
+        sb, moved = vid_story.relink(sb, inv)
+        if moved:
+            print("the inventory changed since this storyboard was made: its clips were found again by their paths")
         res = vid_moment.refine_storyboard(sb, inv, scores, a.work, workers=a.workers, log=print)
         out = Path(a.out or a.storyboard)
         vl.save_json(out, res)
@@ -401,6 +404,10 @@ def cmd_story(a) -> int:
         return 0
     if a.action == "feedback":
         sb = vl.load_json(a.storyboard)
+        sb, moved = vid_story.relink(sb, inv)
+        if moved:
+            raise vl.EngineError("the inventory changed since this storyboard was made (clips were added or removed), so the clip "
+                                 "numbers in the decisions may point at other files: run `story review` again and decide there")
         fb = vl.load_json(a.feedback)
         notes_by = vid_story.cl.notes_by_path(notes)
         views = {r["index"]: vid_story.clip_view(r, scores[r["index"]], vid_story._note(notes_by, r))      # noqa: SLF001
@@ -420,7 +427,9 @@ def cmd_story(a) -> int:
         return 0
     if a.action == "review":
         import vid_review
-        sb = vl.load_json(a.storyboard)
+        sb, moved = vid_story.relink(vl.load_json(a.storyboard), inv)
+        if moved:
+            print("the inventory changed since this storyboard was made: its clips were found again by their paths (alternates dropped)")
         out = Path(a.out or Path(a.storyboard).with_name("review.html"))
         vid_review.write(out, sb, inv, scores, a.work, beats=beats, notes=notes, log=print, video=not a.no_video,
                          workers=a.workers or 6)
@@ -442,7 +451,9 @@ def cmd_story(a) -> int:
                 print("using remembered preferences:\n" + vid_profile.describe(profile))
         approved = None
         if a.cut_from:
-            src = vl.load_json(a.cut_from)
+            src, moved = vid_story.relink(vl.load_json(a.cut_from), inv)
+            if moved:
+                print("the inventory changed since the approved storyboard was made: its clips were found again by their paths")
             approved = {r["clip"]: r.get("start") for r in src.get("rows") or [] if not r.get("banned")}
             if not approved:
                 raise vl.EngineError(f"{a.cut_from} has no shots to cut down from")

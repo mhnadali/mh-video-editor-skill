@@ -310,16 +310,26 @@ def score_inventory(records: list[dict], workers: int | None = None, limit: int 
                     min_duration: float = 0.0) -> list[dict]:
     """Score every non-duplicate clip. `previous` = earlier score entries keyed by path: entries whose file is
     unchanged (same size and mtime) are reused, so re-running after adding clips only measures the new ones.
-    `min_duration` skips clips too short to ever be used (the selection never takes a clip under 5 s)."""
+    `min_duration` does not MEASURE clips too short to ever be used (the selection never takes a clip under 5 s); an earlier
+    measurement of such a clip is kept, so the relative numbers (energy and sound percentiles) do not change with the option."""
+    previous = previous or {}
     recs = [r for r in records if r.get("dup_of") is None]       # exact duplicates are never candidates
+    kept_short: list = []
     if min_duration > 0:
-        recs = [r for r in recs if (r.get("duration") or 0.0) >= min_duration - 0.1]
+        long_ = []
+        for r in recs:
+            if (r.get("duration") or 0.0) >= min_duration - 0.1:
+                long_.append(r)
+                continue
+            old = previous.get(r["path"])
+            if old and old.get("size") == r.get("size") and old.get("mtime") == r.get("mtime") and "quality" in old:
+                kept_short.append(dict(old, index=r["index"]))
+        recs = long_
     if limit:
         recs = recs[:limit]
     if hw is None:
         import vid_render
         hw = vid_render.nvenc_works()
-    previous = previous or {}
     done = 0
     reused = 0
     began = time.monotonic()
@@ -348,6 +358,8 @@ def score_inventory(records: list[dict], workers: int | None = None, limit: int 
 
     with ThreadPoolExecutor(workers or vl.cpu_workers(8)) as ex:
         scores = list(ex.map(one, recs))
+    if kept_short:
+        scores = sorted(scores + kept_short, key=lambda s: s["index"])
     ok = [s for s in scores if "quality" in s]
     for s, e in zip(ok, percentile_rank([s["motion"] for s in ok])):
         s["energy"] = e

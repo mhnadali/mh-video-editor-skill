@@ -12,6 +12,8 @@ and method, and checks what must ALWAYS hold:
   chrono-order      trip order inside chronological chapters   chapter-order     chapters follow the trip
   outside-chapter   every shot belongs to its chapter          start-outside     every start lies inside its clip
   unfilled-silent   an unfilled slot is always explained       underfilled       slots stay empty only when the chapters have no usable clip left
+  not-approved      a cut-down uses only approved shots         approved-start    ... each at its approved start
+  user-start        a clip with a start the user chose keeps it (unless a cut-down's approved start wins)
 
 Then it applies random feedback (replace, keep, ban, unban, start, biases, weights, nonsense) and checks that a decision is either
 refused with a clear error or leaves a valid profile, no clip twice, no banned clip unmarked and a profile `story select` accepts.
@@ -66,11 +68,16 @@ def random_case(seed: int) -> dict:
         idx = [r["index"] for r in inv]
         profile = dict(vpf.empty(), banned=[inv[i]["path"] for i in rng.sample(idx, min(5, len(idx)))],
                        topics={"food": rng.choice([-0.3, 0.2])}, pins={inv[i]["path"]: 0 for i in rng.sample(idx, 2)},
-                       favoured=[inv[i]["path"] for i in rng.sample(idx, 3)])
+                       favoured=[inv[i]["path"] for i in rng.sample(idx, 3)],
+                       starts={inv[i]["path"]: round(rng.uniform(0, 20), 2) for i in rng.sample(idx, 6)})
     duration = rng.choice([15.0, 30.0, 45.0, 60.0])
+    approved = None
+    if rng.random() < 0.3:                          # a cut-down: an approved subset of the library, at chosen starts
+        pool = [r["index"] for r in inv if (r.get("duration") or 0) >= 4.9]
+        approved = {i: round(rng.uniform(0, 3), 2) for i in rng.sample(pool, min(len(pool), rng.randint(8, 40)))}
     return {"inv": inv, "sc": sc, "cfg": cfg, "profile": profile, "duration": duration, "beats": ev.build_beats(duration),
             "variant": rng.choice(["balanced", "action", "people"]), "method": rng.choice(["beam", "greedy"]),
-            "pacing": rng.choice(["energy", "beat"])}
+            "pacing": rng.choice(["energy", "beat"]), "approved": approved}
 
 
 def check_storyboard(case: dict, sb: dict) -> list:
@@ -109,10 +116,34 @@ def check_storyboard(case: dict, sb: dict) -> list:
             bad.append(("start-outside", (r["clip"], r["start"])))
     if len(rows) < sb["slots"] and not sb["warnings"]:
         bad.append(("unfilled-silent", (len(rows), sb["slots"])))
-    reasons = vf.exclusions(inv, sc, None, None, None, must=must)["reasons"]
-    cap = sum(1 for c in chapters if c["weight"] > 0 for r in inv
-              if c["from"] <= r["index"] <= c["to"] and r["index"] not in banned
-              and (r["index"] not in reasons or all(w.split(":")[0] in st.SOFT_REASONS for w in reasons[r["index"]])))
+    approved = case.get("approved")
+    if approved is not None:
+        if any(r["clip"] not in approved for r in rows):
+            bad.append(("not-approved", [r["clip"] for r in rows if r["clip"] not in approved][:3]))
+        if any(abs(r["start"] - approved[r["clip"]]) > 0.011 for r in rows if r["clip"] in approved):
+            bad.append(("approved-start", [(r["clip"], r["start"]) for r in rows if r["clip"] in approved][:3]))
+    elif profile:
+        for r in rows:
+            s = vpf.start_of(profile, by[r["clip"]]["path"])
+            if s is not None and (r["start_kind"] != "set by the user" or abs(r["start"] - min(s, by[r["clip"]]["duration"] - 0.3)) > 0.011):
+                bad.append(("user-start", (r["clip"], r["start"], s)))
+    # capacity as the engine sees it: the same exclusions (with the profile's preferred takes), bans and approval
+    prefer = set()
+    if profile:
+        fav = {vpf.norm(p) for p in profile.get("favoured", [])}
+        prefer = {r["index"] for r in inv if vpf.norm(r["path"]) in fav} | set(vpf.pinned(profile, inv))
+    excluded = {k: list(v) for k, v in vf.exclusions(inv, sc, None, None, None, must=must, prefer=prefer)["reasons"].items()}
+    for i in banned:
+        excluded.setdefault(i, []).append("banned")
+    if approved is not None:
+        for r in inv:
+            if r["index"] not in approved:
+                excluded.setdefault(r["index"], []).append("not-approved")
+    cap = 0
+    for c in chapters:
+        if c["weight"] > 0:
+            c2 = dict(c, must=sorted(set(c.get("must") or []) | {i for i in must if c["from"] <= i <= c["to"]}))
+            cap += len(st.pool(c2, inv, sc, {}, set(), excluded, relaxed=True))
     if len(rows) < min(sb["slots"], cap) - 2 - (1 if cfg.get("hook") == "teaser" else 0):
         bad.append(("underfilled", (len(rows), sb["slots"], cap)))
     return bad
@@ -122,7 +153,7 @@ def run_selection(seed: int) -> list:
     case = random_case(seed)
     try:
         sb = st.select(case["inv"], case["sc"], case["beats"], case["cfg"], None, duration=case["duration"], pacing=case["pacing"],
-                       variant=case["variant"], method=case["method"], profile=case["profile"])
+                       variant=case["variant"], method=case["method"], profile=case["profile"], approved=case["approved"])
     except vl.EngineError as e:
         return [] if any(x in str(e) for x in REFUSALS) else [("refused-unclearly", str(e)[:120])]
     except Exception as e:                                          # noqa: BLE001  any crash is a finding

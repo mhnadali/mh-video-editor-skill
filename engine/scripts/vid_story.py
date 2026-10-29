@@ -301,7 +301,8 @@ def clip_view(rec: dict, score: dict, note: dict) -> dict:
             "quality": (score.get("quality") or 0.0) / 100.0, "act": act,
             "sound": None if score.get("sound") is None else score["sound"] / 100.0,
             "transient": None if score.get("transient") is None else score["transient"] / 100.0,
-            "hash": score.get("hash"), "size": size, "role": role, "topic": note.get("topic"),
+            "hash": score.get("hash"), "size": size, "size_known": bool(note.get("shot_size")) or size == "close",
+            "role": role, "topic": note.get("topic"),
             "people": _people(note, score), "people_certainty": _people_certainty(note, score),
             "best_start": score.get("best_start", 0.0), "action_start": action_start,
             "brightness": score.get("brightness"), "csig": score.get("csig") or [], "scene": score.get("scene"),
@@ -619,6 +620,9 @@ def select(inventory: list, scores: dict, beats: dict, cfg: dict, notes: Optiona
         kind = "action moment" if action else "best frame window"
         if approved is not None and approved.get(v["index"]) is not None:
             start, kind = float(approved[v["index"]]), "as approved"
+        elif profile and vprof.start_of(profile, v["path"]) is not None:
+            # the start the user chose on the review page for this clip
+            start, kind = min(float(vprof.start_of(profile, v["path"])), max(0.0, v["duration"] - 0.3)), "set by the user"
         rows.append({"slot": k, "t": s["t"], "len": s["len"], "music": s["music"], "chapter": cname, "clip": v["index"],
                      "name": v["name"], "taken": v["taken"], "device": v["device"], "role": v["role"], "size": v["size"],
                      "people": v["people"], "people_certainty": v.get("people_certainty", 1.0 if v["people"] else 0.0),
@@ -658,9 +662,11 @@ def transition_value(hist: list, cur: dict, w: dict) -> tuple:
     prev = hist[-1]
     v, why = 0.0, []
     if prev["size"] and prev["size"] == cur["size"]:
-        v -= w["size"]
+        # a measured size (wide / medium) agrees with the eye 63 % of the time: it counts half as much as a noted one
+        sure = 1.0 if (prev.get("size_known", True) and cur.get("size_known", True)) else 0.5
+        v -= w["size"] * sure
         if len(hist) >= 2 and hist[-2]["size"] == prev["size"]:
-            v -= 1.5 * w["size"]
+            v -= 1.5 * w["size"] * sure
             why.append("a third shot of the same size")
     if cur["topic"] and cur["topic"] == prev["topic"]:
         v -= w["topic_run"]
@@ -800,6 +806,24 @@ def plan_slots(chapters: list, counts: list, slots: list, cursor: int, inventory
         shortlist[c["name"]] = sorted({v["index"] for p in plan if p["chapter"] is c for v in p["cands"]})
         cursor += counts[chapters.index(c)]
     return plan, shortlist
+
+
+def relink(sb: dict, inventory: list) -> tuple:
+    """A storyboard refers to clips by inventory index; after `probe` runs again (clips added or removed) the indexes move.
+    Each row also holds its file's path: point every row at that file's current index. Returns (storyboard, changed). Alternates
+    are indexes only, so they are cleared when anything moved. A file that is no longer in the inventory is an error."""
+    by_path = {os.path.normcase(os.path.abspath(r["path"])): r["index"] for r in inventory}
+    rows, moved = [], False
+    for r in sb.get("rows") or []:
+        idx = by_path.get(os.path.normcase(os.path.abspath(r.get("path") or "")))
+        if idx is None:
+            raise vl.EngineError(f"slot {r.get('slot')}: {r.get('path')} is not in the inventory any more; make the storyboard again")
+        if idx != r.get("clip"):
+            moved = True
+        rows.append(dict(r, clip=idx))
+    if moved:
+        rows = [dict(r, alternates=[]) for r in rows]
+    return dict(sb, rows=rows), moved
 
 
 def select_variants(inventory: list, scores: dict, beats: dict, cfg: dict, notes: Optional[dict] = None,
@@ -969,7 +993,13 @@ def audit_edl(edl: dict, inventory: list, scores: dict, beats: Optional[dict] = 
     n = len(known)
     # order of the trip
     if chronological:
-        inv = sum(1 for (a, _), (b, _) in zip(known, known[1:]) if b["epoch"] < a["epoch"] - 1)
+        # inside a chapter ordered by the music (`order: energy`) the trip's order is given up on purpose
+        free = [c for c in (cfg or {}).get("chapters") or [] if c.get("order") == "energy"]
+
+        def same_free_chapter(a, b):
+            return any(c["from"] <= a["index"] <= c["to"] and c["from"] <= b["index"] <= c["to"] for c in free)
+
+        inv = sum(1 for (a, _), (b, _) in zip(known, known[1:]) if b["epoch"] < a["epoch"] - 1 and not same_free_chapter(a, b))
         stats["order_inversions"] = inv
         if inv:
             findings.append({"level": "warn", "code": "trip-order", "msg": f"{inv} shot(s) are earlier in the trip than the shot before them"})

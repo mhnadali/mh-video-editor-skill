@@ -470,7 +470,8 @@ def audit_edit(edl: dict, scores: dict | None = None, notes: dict | None = None)
         feats = []
         for sh in edl["shots"]:
             key = os.path.normcase(os.path.abspath(sh["clip"]))
-            feats.append(next((s for s in scores.values() if s.get("path") and os.path.normcase(os.path.abspath(s["path"])) == key), {}))
+            f = next((s for s in scores.values() if s.get("path") and os.path.normcase(os.path.abspath(s["path"])) == key), {})
+            feats.append(dict(f, shot_size_from="measured") if f.get("shot_size") else f)
         if notes:                                          # the agent's reading of the footage wins over the measurements
             import vid_cutlogic
             nt = vid_cutlogic.notes_by_path(notes)
