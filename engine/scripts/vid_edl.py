@@ -577,6 +577,9 @@ def _phase4_issues(edl: dict, style: dict, shots: list[dict]) -> list[dict]:
         out += vid_sfx.validate(edl)
     except ImportError:
         pass
+    import vid_musicfit
+    for msg in vid_musicfit.validate((edl.get("project") or {}).get("music_edit")):
+        out.append({"level": "error", "code": "music-edit", "msg": msg})
     return out
 
 

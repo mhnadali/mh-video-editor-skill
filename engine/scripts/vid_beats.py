@@ -17,8 +17,12 @@ from pathlib import Path
 import vidlib as vl
 
 SR = 11025          # analysis sample rate
-HOP = SR // 100     # 10 ms frames
-FRAME = 0.01
+HOP = SR // 100     # about 10 ms frames: 110 samples
+# The real length of a frame. Up to 0.25 this was 0.01 s, but 110 samples at 11025 Hz are 9.977 ms: every beat time came out
+# 0.23 % late (a 150 s click track: +0.097 s at 45 s, +0.205 s at 90 s, and a 119.71 BPM fit for 120). Beats, drop and sections
+# all scale with it; beats.json files made before carry no "timebase" and are reported as stale.
+FRAME = HOP / SR
+TIMEBASE = 2
 
 
 def decode_pcm(path: str | os.PathLike, max_seconds: float | None = None) -> array.array:
@@ -483,7 +487,7 @@ def analyse(path: str | os.PathLike, max_seconds: float | None = None, bpm_range
     beats_ref = beats_following_tempo(tmap, t0, duration)
     drop_refined = refine_onset(pcm, sections["drop"]) if sections["drop"] is not None else None
     return {
-        "file": vl.ffp(path), "duration": round(duration, 3), "bpm": round(60 / period, 2),
+        "file": vl.ffp(path), "timebase": TIMEBASE, "duration": round(duration, 3), "bpm": round(60 / period, 2),
         "period": round(period, 4), "phase": round(phase, 3), "t0": round(t0, 3),
         "confidence": round(confidence, 2), "alternatives": alts, "beats_per_bar": beats_per_bar,
         "drop": sections["drop"], "drop_beat": sections["drop_beat"], "drop_ratio": sections["drop_ratio"],
@@ -494,3 +498,11 @@ def analyse(path: str | os.PathLike, max_seconds: float | None = None, bpm_range
         "note": "Grid fitted to onsets; verify with `plan` output or by ear. If BPM looks doubled/halved, "
                 "pass the alternative period to `plan --period` (or force it with `beats --bpm`).",
     }
+
+
+def stale(beats: dict | None) -> str | None:
+    """A warning when beats.json was made before the frame-length fix of 0.26 (its times run 0.23 % late), else None."""
+    if not beats or beats.get("timebase", 1) >= TIMEBASE:
+        return None
+    return ("WARNING: this beats.json was made before 0.26: its beat times run 0.23 % late (0.1 s at 45 s, 0.2 s at 90 s). "
+            "Run `beats` on the music again, then `story select` / `plan` again, before rendering.")

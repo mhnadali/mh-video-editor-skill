@@ -604,7 +604,14 @@ def audio_plan(edl: dict, bounds: list[int], trans: dict[int, str], work: Path, 
                             "out_seconds": nominal, "speed": pl["speed"], "has_audio": bool(info.get("has_audio"))})
         music = p.get("music")
         music_mean = vid_sfx.mean_volume(music, 0.0, p["duration"]) if music else None
-        segs = vid_sfx.ambient_segments(edl, windows, music_mean)
+        left_out: list = []
+        segs = vid_sfx.ambient_segments(edl, windows, music_mean, left_out)
+        if left_out:
+            why = {}
+            for x in left_out:
+                why.setdefault(x["why"], []).append(x["j"])
+            log("ambient sound left out: " + "; ".join(f"{k} in shot(s) {', '.join(map(str, v))}" for k, v in why.items()) +
+                ' (set "audio": {"use": true} on a shot to keep it)')
         if segs:
             lines, label = vid_sfx.ambient_lines(segs, 1, amb)
             plan.update(ambient_lines=lines, ambient_label=label)
@@ -760,12 +767,33 @@ def build_graph(edl: dict, parts: list[dict], bounds: list[int], trans: dict[int
     return lines, extra
 
 
+def edited_music(src: str, edit: dict, work: Path) -> str:
+    """The music cut at `edit['cut']` and resumed at `edit['resume']` (vid_musicfit), as a cached wav."""
+    import vid_musicfit
+    if not os.path.isfile(src):
+        raise vl.EngineError(f"music not found: {src}")
+    st = os.stat(src)
+    key = hashlib.sha1(json.dumps([vl.ffp(src), st.st_size, int(st.st_mtime), edit["cut"], edit["resume"],
+                                   edit.get("tempo", 1.0)]).encode()).hexdigest()[:16]
+    work.mkdir(parents=True, exist_ok=True)
+    out = work / f"music_edit_{key}.wav"
+    if out.is_file() and wav_complete(out):
+        return str(out)
+    vl.run([vl.find_ffmpeg()["ffmpeg"], "-v", "error", "-y", "-i", vl.ffp(src), "-filter_complex", vid_musicfit.edit_filter(edit),
+            "-map", "[music]", "-c:a", "pcm_s16le", "-ar", "44100", vl.ffp(out)])
+    return str(out)
+
+
 def resolve_music(edl: dict, work: Path) -> str | None:
     """Return a single music file path for the render. `project.music` may be a list of user tracks (phase 10 music
     sections): they are concatenated, equal-loudness-formatted, into one cached wav so the rest of the audio pipeline
     (fades, ducking, two-pass master) is unchanged."""
     p = ve.project(edl)
     music = p.get("music")
+    edit = p.get("music_edit")
+    if edit and music:
+        src = music if isinstance(music, str) else resolve_music(dict(edl, project=dict(edl["project"], music_edit=None)), work)
+        return edited_music(src, edit, work)
     if not music or isinstance(music, str):
         return music if music else None
     files = [m for m in music if m]

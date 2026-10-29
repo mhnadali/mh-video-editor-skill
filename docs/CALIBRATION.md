@@ -104,3 +104,18 @@ duplicate. Put the settings you adopt in `chapters.json` under `dedupe` (`hash_b
   every sample and each proxy sat at its storyboard start (slot 9: 19.61 s against 19.63 s). Two bugs the node stub could not show
   (`HTMLCollection` has no `forEach`; `requestAnimationFrame` stops while the page is not drawn) were fixed, and the stub now
   behaves like the browser in both.
+
+## Phase J measurements (same trip): the sound
+- **The beat analysis ran 0.23 % slow (fixed).** Frames of 110 samples at 11025 Hz are 9.977 ms, and times were counted as 10 ms.
+  A 150 s click track at 120 BPM: +0.013 s at 10 s, +0.097 s at 45 s, +0.205 s at 90 s, tempo 119.71; now under 0.01 s everywhere
+  and 119.98. The Kavir beats moved by -0.011 s at 5 s, -0.044 s at 20 s and -0.101 s at 45 s (98.05 -> 98.27 BPM): the cuts at the
+  end of the earlier edits were three frames late. QA could not see it, because it measured the cuts against the same grid.
+- **Where the beats really are.** Against the onset peaks of the song, the one-tempo grid sits within 0.03 s at the start and at
+  the end; the tempo-map grid (`beats_refined`) claimed a drift from 99 to 97 BPM that the onsets do not show (+0.07 s at the end).
+- **Music edit.** For each join of the Kavir song the speed of the ending and a resume shift are chosen on the onset envelope so the
+  beats after the join sit where the original had them; rendered and measured: within 0.01 s of the original (median). Joins chosen
+  by separate tempo and phase estimates had been 0.05-0.09 s off. The edited file is sample-exact (cross-correlation 0.000 s).
+- **Sound of the clips (provisional).** Five synthetic sounds (wind, talk, engine, quiet, clipped) are told apart. On the 174 clips
+  the agent read, "voices" came out for 32 % of the people clips against 18 % of the action clips, "rumble" (engines) for 35 % of the
+  action clips, "wind" for 28 % of the landscapes: the right direction, not yet proof. 461 clips measure in 18 s. The thresholds
+  wait for the user's ears (listening page, `calibrate_audio.py`).

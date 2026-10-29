@@ -5,7 +5,7 @@ behind the MP4 export / size-reduction layer, and hand-off notes for continuing 
 
 ## State
 
-Version **0.25.0**. Standard-library Python over FFmpeg (plus an optional, separately installed vision plug-in), 830+ tests on
+Version **0.26.0**. Standard-library Python over FFmpeg (plus an optional, separately installed vision plug-in), 830+ tests on
 synthetic media, and since 0.17 every selection change is measured against a real trip (486 clips, three cameras, two days;
 numbers in `docs/CALIBRATION.md`).
 
@@ -19,8 +19,10 @@ offline review page, an evaluation harness; then a deep review that fixed twelve
   was 1-2 levels dark), an optional 10-bit HEVC master. Banding and noise measured on all storyboard shots: no filter needed.
 - **I, the opening, the ending, the whole flow (0.25):** *Play the storyboard* over the music on the review page, `story hook`
   (teaser candidates from the clips the agent read; measured energy cannot find a hook), `teaser_clip`, a calibrated loop check.
-- Next: J sound (0.26); K content understanding (0.27); L workflow and speed (0.28); M reliability (0.29); 1.0 on a second real
-  project.
+- **J, the sound (0.26):** the beat analysis' 0.23 % time-scale error fixed; clip sound measured (voices, wind, engines, clipping)
+  and windy or clipped ambient left out; `music fit` ends on the song's own ending with the beats kept; a listening page and
+  `calibrate_audio.py` (the thresholds wait for the user's ears).
+- Next: K content understanding (0.27); L workflow and speed (0.28); M reliability (0.29); 1.0 on a second real project.
 
 ## Real-footage arc (0.17 - 0.23, phases A - G)
 - **A, validation (0.17):** the picture hashes were one frame repeated (fixed, scores repaired in place); same-moment strictness
