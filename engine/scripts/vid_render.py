@@ -199,9 +199,9 @@ def precise_parts(quality: str | None, preview: bool = False) -> bool:
 def x264_10bit() -> bool:
     """Does this libx264 encode 10-bit (every build since 2019 does both depths; older ones were 8-bit only)? Cached."""
     if "x264_10bit" not in _ENC_CACHE:
-        cmd = [vl.find_ffmpeg()["ffmpeg"], "-v", "error", "-f", "lavfi", "-i", "color=c=gray:s=64x64:d=0.1", "-c:v", "libx264",
-               "-pix_fmt", "yuv420p10le", "-f", "null", "-"]
-        try:
+        try:                                  # no FFmpeg at all counts as no (the render will say so where it matters)
+            cmd = [vl.find_ffmpeg()["ffmpeg"], "-v", "error", "-f", "lavfi", "-i", "color=c=gray:s=64x64:d=0.1", "-c:v", "libx264",
+                   "-pix_fmt", "yuv420p10le", "-f", "null", "-"]
             _ENC_CACHE["x264_10bit"] = vl.run(cmd, check=False, timeout=30).returncode == 0
         except Exception:
             _ENC_CACHE["x264_10bit"] = False
