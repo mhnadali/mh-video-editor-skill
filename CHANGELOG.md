@@ -2,6 +2,12 @@
 
 All notable changes to this project. Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [SemVer](https://semver.org/).
 
+## [0.22.0] - 2026-10-29 (phase F: several outputs from one approval, taste across projects)
+### Added
+- **Cut-downs:** `story select --cut-from storyboard.json --duration N` makes another length from an approved storyboard only, at its approved starts (a banned row is not approved). When the new length has fewer slots than chapters, the lightest chapters are left out with a warning instead of an error. A 15 s cut of the real 45 s storyboard kept the stronger shots (0.80 against 0.76) in trip order.
+- **`story profile --promote` / `--forget-global`:** carry a project's topic / role biases and weights to every project (averaged, so one project cannot swing it); clip decisions stay with their footage.
+- **`pick_music.py --chapters`:** ranks the user's own tracks also by how well the energy of their first `--target-seconds` follows the story's arc (`arc_fit`, -1 to 1, up to 15 points).
+
 ## [0.21.0] - 2026-10-29 (phase E: speed and scale, measured)
 ### Changed
 - **Review proxies are faster and reused.** Proxies decode without the deblocking filter and the B-frames (21-32 % faster on real 4K clips; they are only for choosing) and hold 14 s instead of 24 s; the window is in the file name, so a page made again after `story feedback` only makes proxies for new clips. The real 35-shot page: 291 s -> 157 s, a rebuild 13 s.

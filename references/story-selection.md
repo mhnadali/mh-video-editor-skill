@@ -95,6 +95,20 @@ to point elsewhere, `--no-profile` to ignore it; a global profile at `~/.mh-vide
 every project, the project's own file wins). `story profile --work W` shows what is remembered. Nothing is learned without an
 explicit decision, and the file is plain JSON the user may edit.
 
+### Other lengths from one approval (cut-downs)
+Once the user approved a storyboard, other lengths need no new approval of every shot:
+`story select --work W --beats beats.json --chapters chapters.json --duration 15 --cut-from storyboard.json --out storyboard_15.json`
+uses only the approved shots, each at its approved start, and fills the new music by the same rules. When the new length has
+fewer slots than there are chapters, the chapters of lowest weight (then lowest energy) are left out with a warning. On the first
+real trip a 15 s cut of the approved 45 s storyboard kept 11 of 35 shots, all in trip order, the stronger ones (mean score 0.80
+against 0.76 for the dropped ones), and left out three light chapters. Other aspect ratios come from the render
+(`render --format` / `--all-formats`, see `formats.md`). Show the cut-down's storyboard before rendering it.
+
+### Taste across projects
+`story profile --work W --promote` adds the project's topic and role biases (averaged with what the global profile holds) and its
+weights to the global profile (`~/.mh-video-skill/profile.json`, or `MH_PROFILE`); clip decisions (banned, favoured, pinned)
+belong to that footage and stay in the project. `story profile --work W --forget-global` shows and deletes the global profile.
+
 ### Measuring the selection
 `python engine/tools/eval_selection.py --check` builds a synthetic library with a known truth (short clips, same-moment copies on
 one and two cameras, people clips) and reports: short clips used (must be 0), both takes of a moment used (0), best take kept,

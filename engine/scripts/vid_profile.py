@@ -69,6 +69,20 @@ def merge(base: dict, over: dict) -> dict:
     return out
 
 
+def promote(project: dict, global_: dict, source: str = "") -> dict:
+    """The global profile after taking in what a project taught: topic and role biases (averaged with what the global profile
+    already holds, so one project cannot swing it) and weights (the project's win). Clip decisions (banned, favoured, pinned)
+    belong to that project's footage and are never promoted."""
+    out = load_dict(global_)
+    for group in ("topics", "roles"):
+        for k, v in project.get(group, {}).items():
+            out[group][k] = round(_clamp((out[group][k] + v) / 2.0 if k in out[group] else v), 3)
+    out["weights"].update(project.get("weights", {}))
+    out["history"].append({"when": dt.datetime.now().isoformat(timespec="seconds"), "action": "promote", "from": source})
+    validate(out)
+    return out
+
+
 def load_for(work: str | os.PathLike, path: str | os.PathLike | None = None, use_global: bool = True) -> dict:
     """The profile that applies to a work folder: the global one, then the project's (`work/profile.json` or `path`)."""
     prof = load(global_path()) if use_global else empty()

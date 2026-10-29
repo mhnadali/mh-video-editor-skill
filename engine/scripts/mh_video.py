@@ -380,6 +380,22 @@ def cmd_story(a) -> int:
         return 0
     import vid_profile
     if a.action == "profile":
+        gpath = vid_profile.global_path()
+        if a.forget_global:
+            if gpath.is_file():
+                print("the global profile held:\n" + vid_profile.describe(vid_profile.load(gpath)))
+                gpath.unlink()
+                print(f"removed {gpath}")
+            else:
+                print(f"there is no global profile ({gpath})")
+            return 0
+        if a.promote:
+            ppath = Path(a.profile or work / "profile.json")
+            new = vid_profile.promote(vid_profile.load(ppath), vid_profile.load(gpath), str(ppath))
+            gpath.parent.mkdir(parents=True, exist_ok=True)
+            vid_profile.save(new, gpath)
+            print(f"wrote {gpath} (topics, roles and weights only; clip decisions stay with the project):\n" + vid_profile.describe(new))
+            return 0
         prof = vid_profile.load_for(a.work, a.profile)
         print(vid_profile.describe(prof))
         return 0
@@ -424,8 +440,15 @@ def cmd_story(a) -> int:
                 profile = None
             else:
                 print("using remembered preferences:\n" + vid_profile.describe(profile))
+        approved = None
+        if a.cut_from:
+            src = vl.load_json(a.cut_from)
+            approved = {r["clip"]: r.get("start") for r in src.get("rows") or [] if not r.get("banned")}
+            if not approved:
+                raise vl.EngineError(f"{a.cut_from} has no shots to cut down from")
+            print(f"cut-down of {a.cut_from}: only its {len(approved)} approved shots are used, at their approved starts")
         kw = dict(duration=a.duration, body_start=a.body_start, pacing=a.pacing, intro_shots=a.intro_shots, period=a.period,
-                  method=a.method, profile=profile)
+                  method=a.method, profile=profile, approved=approved)
         out = Path(a.out or work / "storyboard.json")
         if a.variants:
             sbs = vid_story.select_variants(inv, scores, beats, cfg, notes, **kw)
@@ -640,6 +663,7 @@ ARG_HELP = {
     "profile": "profile.json of remembered preferences (default: <work>/profile.json and the global one)",
     "no_profile": "ignore remembered preferences",
     "no_video": "no proxy videos: one self-contained page with frames only",
+    "cut_from": "an approved storyboard.json: make another length from its shots only, at their approved starts",
     "window": "seconds between two clips of different cameras that count as the same moment",
     "force": "look at every clip again, even those whose earlier result is still valid",
     "feedback": "decisions.json exported by the review page",
@@ -806,6 +830,7 @@ def build_parser() -> argparse.ArgumentParser:
                    help="beam = optimise the whole sequence at once (default); greedy = chapter by chapter (the 0.15 behaviour)")
     q.add_argument("--profile", help="profile.json of remembered preferences (default: <work>/profile.json and the global one)")
     q.add_argument("--no-profile", action="store_true", help="ignore remembered preferences")
+    q.add_argument("--cut-from", help="an approved storyboard.json: make a shorter (or longer) version from its shots only, at their approved starts")
     q = ssub.add_parser("review", help="write an offline HTML page to review a storyboard: frames, alternates, keep / replace / ban")
     q.add_argument("--work", required=True); q.add_argument("--storyboard", required=True); q.add_argument("--out")
     q.add_argument("--beats"); q.add_argument("--notes")
@@ -815,8 +840,10 @@ def build_parser() -> argparse.ArgumentParser:
     q.add_argument("--work", required=True); q.add_argument("--storyboard", required=True)
     q.add_argument("--feedback", required=True, help="decisions.json exported by the review page"); q.add_argument("--out")
     q.add_argument("--profile"); q.add_argument("--notes")
-    q = ssub.add_parser("profile", help="show the remembered preferences")
+    q = ssub.add_parser("profile", help="show the remembered preferences; --promote carries a project's taste to every project")
     q.add_argument("--work", required=True); q.add_argument("--profile")
+    q.add_argument("--promote", action="store_true", help="add this project's topic / role biases and weights to the global profile")
+    q.add_argument("--forget-global", action="store_true", help="show and delete the global profile (projects keep their own)")
     q = ssub.add_parser("audit", help="check an EDL against the story principles (chapters, cameras, people, energy vs music, order)")
     q.add_argument("edl"); q.add_argument("--work", required=True); q.add_argument("--beats"); q.add_argument("--notes")
     q.add_argument("--chapters"); q.add_argument("--free-order", action="store_true", help="do not require the trip order")

@@ -240,7 +240,7 @@ mh_video story exclusions [-h] --work WORK [--chapters CHAPTERS] [--notes NOTES]
 Choose the shots for the chapters and the music; writes storyboard.json/.md and a clip list.
 
 ```
-mh_video story select [-h] --work WORK --beats BEATS --chapters CHAPTERS [--notes NOTES] --duration DURATION [--body-start BODY_START] [--pacing {beat,energy}] [--intro-shots INTRO_SHOTS] [--period PERIOD] [--out OUT] [--clips CLIPS] [--variant {balanced,action,people}] [--variants] [--method {beam,greedy}] [--profile PROFILE] [--no-profile]
+mh_video story select [-h] --work WORK --beats BEATS --chapters CHAPTERS [--notes NOTES] --duration DURATION [--body-start BODY_START] [--pacing {beat,energy}] [--intro-shots INTRO_SHOTS] [--period PERIOD] [--out OUT] [--clips CLIPS] [--variant {balanced,action,people}] [--variants] [--method {beam,greedy}] [--profile PROFILE] [--no-profile] [--cut-from CUT_FROM]
 ```
 
 | Argument | Required / default | Meaning |
@@ -261,6 +261,7 @@ mh_video story select [-h] --work WORK --beats BEATS --chapters CHAPTERS [--note
 | `--method METHOD` | one of `beam`, `greedy` | beam = optimise the whole sequence at once (default); greedy = chapter by chapter (the 0.15 behaviour) |
 | `--profile PROFILE` |  | profile.json of remembered preferences (default: <work>/profile.json and the global one) |
 | `--no-profile` |  | ignore remembered preferences |
+| `--cut-from CUT_FROM` |  | an approved storyboard.json: make a shorter (or longer) version from its shots only, at their approved starts |
 
 ### `story review`
 
@@ -299,16 +300,18 @@ mh_video story feedback [-h] --work WORK --storyboard STORYBOARD --feedback FEED
 
 ### `story profile`
 
-Show the remembered preferences.
+Show the remembered preferences; --promote carries a project's taste to every project.
 
 ```
-mh_video story profile [-h] --work WORK [--profile PROFILE]
+mh_video story profile [-h] --work WORK [--profile PROFILE] [--promote] [--forget-global]
 ```
 
 | Argument | Required / default | Meaning |
 |---|---|---|
 | `--work WORK` | required | work folder (inventory, scores, sheets, beats live here) |
 | `--profile PROFILE` |  | profile.json of remembered preferences (default: <work>/profile.json and the global one) |
+| `--promote` |  | add this project's topic / role biases and weights to the global profile |
+| `--forget-global` |  | show and delete the global profile (projects keep their own) |
 
 ### `story audit`
 

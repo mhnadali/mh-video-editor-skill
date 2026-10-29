@@ -186,12 +186,15 @@ def make_slots(beats: dict, duration: float, body_start: Optional[float], pacing
     return slots
 
 
-def allocate(chapters: list, slots: list, reserve: int = 0, flex: float = 0.3, capacity: Optional[list] = None) -> list:
+def allocate(chapters: list, slots: list, reserve: int = 0, flex: float = 0.3, capacity: Optional[list] = None,
+             drop: bool = False) -> list:
     """How many consecutive slots each chapter gets, in trip order.
 
     Each chapter's wish is its weight's share of the slots. The count may move within +-`flex` (30 % by default) of the wish (never
     below 1 for a chapter with weight > 0) so that high-energy chapters land on loud music and calm ones on quiet music:
-    the cost of a count is how far the music energy of the slots is from the chapter's energy."""
+    the cost of a count is how far the music energy of the slots is from the chapter's energy. When there are more chapters than
+    slots, `drop` leaves out the chapters of lowest weight (then lowest energy) instead of refusing: a cut-down of an approved
+    storyboard keeps what matters most."""
     n = len(slots) - reserve
     active = [c for c in chapters if c.get("weight", 1) > 0]
     if not active:
@@ -218,8 +221,11 @@ def allocate(chapters: list, slots: list, reserve: int = 0, flex: float = 0.3, c
         if sum(hi2) >= n and sum(lo2) <= n:
             lo, hi = lo2, hi2
     if sum(lo) > n:
-        raise vl.EngineError(f"{len(active)} chapters need at least {sum(lo)} slots but the edit has {n}: raise the duration, "
-                             "merge chapters or give a chapter weight 0")
+        if not drop or len(active) <= 1:
+            raise vl.EngineError(f"{len(active)} chapters need at least {sum(lo)} slots but the edit has {n}: raise the duration, "
+                                 "merge chapters or give a chapter weight 0")
+        weakest = min(active, key=lambda c: (c.get("weight", 1), chapter_energy(c), -chapters.index(c)))
+        return allocate([dict(c, weight=0) if c is weakest else c for c in chapters], slots, reserve, flex, capacity, drop=True)
     if sum(hi) < n:
         hi = [h + math.ceil((n - sum(hi)) / len(hi)) for h in hi]
     sl = slots[reserve:]
@@ -326,7 +332,7 @@ def pool(chapter: dict, inventory: list, scores: dict, notes: dict, avoid: set, 
         if i in set(chapter.get("avoid") or []):
             continue
         why = excluded.get(i, [])
-        if any(w in ("banned", "short", "skipped", "unreadable", "copy") for w in why):
+        if any(w in ("banned", "short", "skipped", "unreadable", "copy", "not-approved") for w in why):
             continue                      # never overridden, not even by `must`: a ban, a clip under the minimum length, a skip
         if why and i not in must:
             hard = [w for w in why if w.split(":")[0] not in SOFT_REASONS]
@@ -455,7 +461,11 @@ def pick_by_slot(cands: list, slots: list, chapter: dict, ctx: dict, chosen_glob
 def select(inventory: list, scores: dict, beats: dict, cfg: dict, notes: Optional[dict] = None, duration: float = 45.0,
            body_start: Optional[float] = None, pacing: Optional[str] = "energy", intro_shots: int = 2,
            period: Optional[float] = None, variant: str = "balanced", method: Optional[str] = None,
-           profile: Optional[dict] = None) -> dict:
+           profile: Optional[dict] = None, approved: Optional[dict] = None) -> dict:
+    """The storyboard: one clip per slot of the music, with the reason, alternates and the warnings.
+
+    `approved` ({clip index: start}) makes a cut-down of a storyboard the user already approved: only those clips may be used,
+    each at its approved start, and the slots of the new (usually shorter) music are filled from them by the same rules."""
     cfg = validate_chapters(cfg)
     if profile:
         # the user's remembered taste: weights, a bias per topic / role / favoured clip, banned clips, pinned clips
@@ -492,14 +502,21 @@ def select(inventory: list, scores: dict, beats: dict, cfg: dict, notes: Optiona
     excluded = {k: list(v) for k, v in ex["reasons"].items()}
     for i in banned:
         excluded.setdefault(i, []).append("banned")
+    if approved is not None:
+        for r in inventory:
+            if r["index"] not in approved:
+                excluded.setdefault(r["index"], []).append("not-approved")
     slots = make_slots(beats, duration, body_start, pacing, intro_shots, period)
     teaser = cfg.get("hook") == "teaser"
     capacity = [len(pool(c, inventory, scores, nt, set(), excluded, relaxed=True)) for c in chapters]
-    counts = allocate(chapters, slots, reserve=1 if teaser else 0, flex=cfg.get("flex", 0.3), capacity=capacity)
-    wished = allocate(chapters, slots, reserve=1 if teaser else 0, flex=cfg.get("flex", 0.3))
+    cutdown = approved is not None
+    counts = allocate(chapters, slots, reserve=1 if teaser else 0, flex=cfg.get("flex", 0.3), capacity=capacity, drop=cutdown)
+    wished = allocate(chapters, slots, reserve=1 if teaser else 0, flex=cfg.get("flex", 0.3), drop=cutdown)
     warnings: list = []
     for c, got, wish, cap in zip(chapters, counts, wished, capacity):
-        if got < wish:
+        if c.get("weight", 1) > 0 and got == 0 and wish == 0:
+            warnings.append(f"chapter '{c['name']}' is left out: the edit is too short for every chapter (the lowest weights go first)")
+        elif got < wish:
             warnings.append(f"chapter '{c['name']}' has only {cap} usable clips: it gets {got} shots instead of the {wish} its weight asks for")
     lib_dev: dict = {}
     for r in inventory:
@@ -599,11 +616,14 @@ def select(inventory: list, scores: dict, beats: dict, cfg: dict, notes: Optiona
         s = slots[k]
         action = v["act"] >= 0.6 or v["role"] == "action"
         start = v["action_start"] if action else v["best_start"]
+        kind = "action moment" if action else "best frame window"
+        if approved is not None and approved.get(v["index"]) is not None:
+            start, kind = float(approved[v["index"]]), "as approved"
         rows.append({"slot": k, "t": s["t"], "len": s["len"], "music": s["music"], "chapter": cname, "clip": v["index"],
                      "name": v["name"], "taken": v["taken"], "device": v["device"], "role": v["role"], "size": v["size"],
                      "people": v["people"], "people_certainty": v.get("people_certainty", 1.0 if v["people"] else 0.0),
                      "topic": v["topic"], "energy": round(v["act"], 2), "target": round(target, 2),
-                     "start": round(start, 2), "start_kind": "action moment" if action else "best frame window",
+                     "start": round(start, 2), "start_kind": kind,
                      "score": round(total(parts, w), 3), "path": v["path"],
                      "why": explain(v, parts, target, s), "alternates": [a for a in alt if a != v["index"]][:2]})
     if len(rows) < len(slots):
@@ -615,7 +635,7 @@ def select(inventory: list, scores: dict, beats: dict, cfg: dict, notes: Optiona
     for r in rows:
         r["lookalike"] = sorted(slot_of[j if i == r["clip"] else i] for i, j in alike if r["clip"] in (i, j))
     return {"duration": duration, "slots": len(slots), "body_start": body_start, "pacing": pacing,
-            "variant": variant, "method": method,
+            "variant": variant, "method": method, "cutdown_of": None if approved is None else len(approved),
             "sequence_score": None if sequence_value is None else round(sequence_value, 3),
             "hook": cfg.get("hook", "chronological"), "chapters": chapter_summary(chapters, counts, rows),
             "rows": rows, "warnings": warnings, "coverage": coverage(rows, inventory), "shortlist": shortlist,
