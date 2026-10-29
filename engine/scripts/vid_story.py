@@ -119,6 +119,9 @@ def validate_chapters(cfg: dict) -> dict:
             raise vl.EngineError(f"chapter '{c['name']}': order must be chronological or energy")
     if cfg.get("hook", "chronological") not in ("chronological", "teaser"):
         raise vl.EngineError("hook must be 'chronological' or 'teaser'")
+    tclip = cfg.get("teaser_clip")
+    if tclip is not None and (isinstance(tclip, bool) or not isinstance(tclip, int) or tclip < 0):
+        raise vl.EngineError("teaser_clip must be a clip number (from `story hook`)")
     for key, known in (("filters", vf.DEFAULT_FILTERS), ("dedupe", vf.DEFAULT_DEDUPE)):
         given = cfg.get(key)
         if given is None:
@@ -534,8 +537,17 @@ def select(inventory: list, scores: dict, beats: dict, cfg: dict, notes: Optiona
     cursor = 1 if teaser else 0
     teaser_entry = None
     if teaser:
-        tc = next((c for c in chapters if c["name"] == cfg.get("teaser_chapter")), None) or max(chapters, key=chapter_energy)
-        cands = pool(tc, inventory, scores, nt, set(), excluded)
+        want = cfg.get("teaser_clip")                    # chosen from `story hook` by the user: wins over the automatic choice
+        if want is not None:
+            tc = next((c for c in chapters if c["from"] <= int(want) <= c["to"]), None)
+            if tc is None:
+                raise vl.EngineError(f"teaser_clip {want} is in no chapter")
+            cands = [v for v in pool(tc, inventory, scores, nt, set(), excluded) if v["index"] == int(want)]
+            if not cands:
+                raise vl.EngineError(f"teaser_clip {want} cannot be used: {', '.join(excluded.get(int(want)) or ['not usable'])}")
+        else:
+            tc = next((c for c in chapters if c["name"] == cfg.get("teaser_chapter")), None) or max(chapters, key=chapter_energy)
+            cands = pool(tc, inventory, scores, nt, set(), excluded)
         if not cands:
             raise vl.EngineError("no clip available for the teaser")
         ctx["roles"] = {"action"}

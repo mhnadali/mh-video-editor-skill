@@ -2,6 +2,18 @@
 
 All notable changes to this project. Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [SemVer](https://semver.org/).
 
+## [0.25.0] - 2026-10-29 (phase I: the opening, the ending, the whole flow)
+
+### Added
+- **Play the storyboard** on the review page: the whole edit at its real timing over the music (`story review --beats`), from the
+  proxies cut at the slot times, with the user's choices (a replaced clip or a start set with *Start here* plays at once). No
+  render; a rough cut for judging the flow before approving. Two video elements take turns so a cut does not wait for loading.
+- `story hook`: how strong the storyboard's opening is, the best teaser shots (one per scene, with reasons) and whether the last
+  shot loops back into the first, with the last slot's alternate that would. It ranks only clips the agent has read: measured
+  energy does not tell action from people talking (AUC 0.48 on 174 read clips).
+- `teaser_clip` in chapters.json: opens the storyboard with the teaser the user chose (an unusable clip is refused with the reason).
+- Music sections on the review page's energy curve (dashed lines, red at a drop).
+
 ## [0.24.0] - 2026-10-29 (phase H: the picture)
 Measured on real Kavir shots against the same shots rendered without any lossy step (numbers in `docs/CALIBRATION.md`).
 

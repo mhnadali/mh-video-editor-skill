@@ -39,7 +39,11 @@ are missing. This is the method that replaces it. The engine ranks and checks; y
    - starts action slots on the clip's **action moment** (its most moving window), others on its best-looking window;
    - gives every slot a reason and two alternates.
    `hook: "teaser"` opens with the best action shot of the peak chapter (a flash-forward). The default is strictly
-   chronological: the trip's order wins unless the user asks for a teaser.
+   chronological: the trip's order wins unless the user asks for a teaser. `story hook --work W --storyboard S --notes N` shows
+   how strong the current opening is and the best teaser shots (one per scene) with their reasons, and whether the last shot
+   loops back into the first. It ranks only clips the agent has read (role and mood in shot-notes.json): the measured energy
+   cannot tell an action shot from people talking. To use one, show it to the user, put `"teaser_clip": N` next to
+   `"hook": "teaser"` and select again.
 5. **Storyboard checkpoint.** Show `storyboard.md` (chapters, every shot with its reason and alternates, coverage) and wait for
    the user's approval or changes (swap a shot, change a weight). Only then `plan --clips <clip list> --smart-transitions ...`.
    An autonomous agent cannot ask: it stops after writing the storyboard (`NEEDS_APPROVAL`) unless the caller pre-approved it.
@@ -79,6 +83,11 @@ Two chosen shots that only look alike (a looser reading than the one that drops 
 `story audit` also reports `drop-weak` when the shot that starts on the music's drop is a calm picture. The measured shot size is only wide or medium (63 % agreement with shots labelled by eye); a close-up comes from a large certain face or from your notes, so write `shot_size` in `shot-notes.json` for the shots that matter.
 
 ### Reviewing and teaching
+*Play the storyboard* on the review page plays the whole edit at its real timing over the music (pass `--beats` so the page
+gets the music): the proxies are cut at the slot times, with the user's own choices (a replaced clip or a *Start here* plays at
+once). It is a rough cut with no transitions or colour, for judging the flow before anything is rendered. Dashed lines on the
+energy curve show where the music changes (red for a drop).
+
 `story review` writes `review.html` and a `review_media/` folder of small proxy videos (keep them together; `--no-video` for a single
 file with frames only). The page shows the whole edit as a timeline, every chosen clip and its alternates as three frames and a
 player that starts at the shot's start, the reason for each choice, the music against the pictures, and what was left out and why.
