@@ -436,6 +436,20 @@ def _lint(edl: dict, check_files: bool = True) -> list[dict]:
             need = (bounds[j + 1] - bounds[j]) / fps
             if info["duration"] and info["duration"] < need + 0.2:
                 out.append(_issue("warn", "clip-short", f"shot {j}: clip is {info['duration']:.2f}s but the shot needs {need:.2f}s (last frame will freeze)"))
+            try:
+                import vid_motion
+                sp = vid_motion.normalize_speed(shot.get("speed"))
+            except vl.EngineError:
+                sp = None                                 # reported by the motion checks
+            src_fps = info.get("fps") or 0.0
+            slow = min(sp["from"], sp["to"]) if sp else 1.0
+            # at speed s the clip gives src_fps * s frames per second of the timeline; fewer than the timeline's fps means
+            # frames must be invented
+            if sp and src_fps and slow < 1.0 and fps > src_fps * slow * 1.05 and shot.get("speed_mode", "auto") != "native":
+                out.append(_issue("warn", "slowmo-invented-frames",
+                                  f"shot {j}: {slow:g}x of a {src_fps:.0f} fps clip on a {fps:g} fps timeline: "
+                                  f"{1 - src_fps * slow / fps:.0%} of the frames are interpolated (ghosts or warped edges on fast "
+                                  f"motion). Clean slow motion needs a source of {fps / slow:.0f} fps or more"))
         music = p.get("music")
         music_files = music if isinstance(music, list) else ([music] if music else [])
         for mi, mf in enumerate(music_files):

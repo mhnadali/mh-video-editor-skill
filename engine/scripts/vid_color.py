@@ -723,7 +723,11 @@ def plan_corrections(edl: dict, work: str | os.PathLike, strength: float = 0.8, 
     vs = sorted(s["VAVG"] for s in ok.values())
     median_chroma = (us[len(us) // 2], vs[len(vs) // 2])
     if wb is None:
-        wb = "median" if match == "exposure" else "off"
+        # after `color cameras` the cameras are already matched to each other: pulling every shot towards the median balance
+        # on top of that would also flatten real differences of light, so the default becomes 'off'
+        wb = "off" if edl.get("camera_match") else ("median" if match == "exposure" else "off")
+        if edl.get("camera_match"):
+            log("the cameras of this EDL are matched (color cameras): white balance is left alone (--wb to override)")
     out = {}
     for j, s in ok.items():
         if only is not None and j not in only:
@@ -740,14 +744,22 @@ def plan_corrections(edl: dict, work: str | os.PathLike, strength: float = 0.8, 
 
 
 def apply_plan(edl: dict, plan: dict, overwrite: bool = False) -> int:
-    """Write planned corrections into the EDL shots (skips shots that already have one unless overwrite)."""
+    """Write planned corrections into the EDL shots (skips shots that already have one unless overwrite). A shot whose camera
+    was matched (`color cameras`) keeps its camera gain on top of the new correction."""
+    import vid_camera
     n = 0
     for j, item in plan.items():
         shot = edl["shots"][j]
         if shot.get("correct") is not None and not overwrite:
             continue
-        if item["correct"]:
-            shot["correct"] = item["correct"]
+        cam = vid_camera.camera_gain_of(edl, j)
+        new = item["correct"]
+        if cam:
+            base = dict(new) if new else {k: (list(v) if isinstance(v, list) else v) for k, v in IDENTITY_CORRECTION.items()}
+            base["gain"] = [round(clamp(a * b, 0.5, 2.0), 4) for a, b in zip(base["gain"], cam)]
+            new = normalize_correction(base)
+        if new:
+            shot["correct"] = new
             n += 1
         elif "correct" in shot and overwrite:
             del shot["correct"]

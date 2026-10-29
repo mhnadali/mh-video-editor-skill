@@ -11,6 +11,11 @@ Two passes with vid.stab: the shot is analysed in a first FFmpeg run (the `.trf`
 - On a synthetic shaky clip (+-25 px jitter) `light` removes about 20% and `strong` about 45% of the frame-to-frame motion; use it for car-window and handheld shots, not for clips that are already steady (it leaves those alone, but costs a pass).
 - Stabilising an already slowed shot exaggerates residual wobble (the linter warns).
 
+Measured on the shakiest clip of a real trip (hand-held, 4K): `light` cut the camera jitter from 2.41 to 1.67 (-31 %); `strong`
+did the same on that clip. `plan --scores W --stabilize-shaky [SHAKE]` sets `light` on every shot whose clip `score` measured
+shaky (shake >= 1.5 by default) and that has no `stabilize` setting of its own; it costs a second analysis pass and crops a little,
+so it is opt-in.
+
 ## Speed
 ```json
 {"speed": 0.5}                                   // slow motion
@@ -32,3 +37,7 @@ Slow motion needs frames that were never recorded, so the mode matters:
 - Retimed shots are muted in the ambient sound (a slowed engine sound is wrong) unless the shot says `"audio": {"speed_follow": true}`.
 - Slow motion counts as a visible effect (`slow-motion`) against the budget of three: zoom + drop flash + slow motion fits, adding the end flare does not. Make room instead of raising the budget.
 - Measured on test clips: the playback speed of the output equals the requested speed within 0.06 (constant) and the ramp follows speed(t) = from + (to - from) * t / L.
+
+- `lint` warns `slowmo-invented-frames` when a slowed shot needs more frames than its clip has (a 30 fps clip at 0.5x on a 30 fps
+  timeline: half the frames are interpolated). Clean slow motion needs a source of timeline fps / speed (60 fps for 0.5x). The
+  first real trip was filmed entirely at 25-30 fps, so slow motion there would be interpolated.

@@ -2,6 +2,15 @@
 
 All notable changes to this project. Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [SemVer](https://semver.org/).
 
+## [0.20.0] - 2026-10-29 (phase D: image quality, measured on real footage)
+### Added
+- **`color cameras`** (`vid_camera.py`): matches the colour of the cameras of one trip to each other, estimated only from clips of two cameras filmed within a minute of each other, kept only with enough pairs and above its uncertainty, and anchored on the camera that filmed most (`--reference` to choose). Out of sample on the first real trip the camera difference fell from 0.135 to 0.102. `--edl EDL --write` multiplies the gains into the shots' corrections once; `color plan` then leaves white balance alone by default and keeps the camera gain on `--overwrite`.
+- **`plan --stabilize-shaky [SHAKE]`** (with `--scores`): light stabilisation for picks measured shaky. On the shakiest real clip it cut the jitter by 31 %.
+- **`lint` `slowmo-invented-frames`:** slow motion that needs more frames than the clip has.
+
+### Measured and not built
+- Reframing 16:9 to 9:16: 468 of 486 real clips were already vertical. Slow-motion suggestions: no clip was above 30 fps. Sound balance: it needs listening.
+
 ## [0.19.0] - 2026-10-28 (phase C: the review experience)
 ### Added
 - **`story review` plays the clips.** Next to the page it makes a small proxy video of every shown clip (`<page>_media/`: 240 p, no sound, at most 24 s starting 6 s before the shot, about 90 KB each on the first real trip) and shows a player under the frame strip, already at the shot's start. **Start here** uses the frame on screen as the new start (`story feedback` applies `{"action": "start", "slot", "clip", "start"}`; a start meant for a clip that was replaced in the same round is ignored). `--no-video` keeps the page a single self-contained file.

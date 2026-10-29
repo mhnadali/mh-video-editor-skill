@@ -65,7 +65,10 @@ class Everything(unittest.TestCase):
         vl.save_json(cls.path, edl)
 
     def test_00_lint_is_clean_apart_from_clip_reuse(self):
-        issues = [i for i in ve.lint(self.edl) if i["code"] != "clip-reused"]
+        issues = ve.lint(self.edl)
+        # shot 5 slows a 30 fps test clip to 0.5x on purpose: the frames are interpolated, which lint rightly reports
+        self.assertIn("slowmo-invented-frames", [i["code"] for i in issues])
+        issues = [i for i in issues if i["code"] not in ("clip-reused", "slowmo-invented-frames")]
         self.assertEqual(issues, [], ve.format_issues(issues))
 
     def test_10_vertical_final_passes_the_gate_with_everything_on(self):

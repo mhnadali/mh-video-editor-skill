@@ -71,7 +71,7 @@ For a platform deliverable, add `--delivery reels|tiktok|shorts|stories|youtube|
 ### 4b. Finishing layers (all optional, all EDL fields; add only what the brief asks for)
 | Layer | How | Reference |
 |---|---|---|
-| Colour correction | `color plan EDL --match exposure [--wb skin]` (dry run, read the reasons; `skin` warms but never cools, protecting skin tones), then `--write`; `correct.secondary` adjusts only one hue (sky, foliage, skin); check with `color scope` / `color analyze --scope` | `references/color-grading.md` |
+| Colour correction | several cameras: `color cameras --work W --edl EDL --write` first (matches the cameras to each other from clips filmed at the same time); then `color plan EDL --match exposure [--wb skin]` (dry run, read the reasons; `skin` warms but never cools, protecting skin tones), then `--write`; `correct.secondary` adjusts only one hue (sky, foliage, skin); check with `color scope` / `color analyze --scope` | `references/color-grading.md` |
 | Colour grade | `style.grade` defaults to `neutral` (the picture as the camera saw it). A creative look (`desert-gold`, `teal-orange` ...) or your own `.cube` LUT only when the user asks for one: warm looks and the end flare made a desert reel "far too warm". One look per video | `references/color-grading.md` |
 | HDR iPhone clips | `style.hdr_tonemap` (default `hable-203`; `legacy` reproduces v1-v4) | `references/color-grading.md` |
 | Stabilise, slow motion, speed ramp | `shot.stabilize`, `shot.speed` (+ `speed_mode`) | `references/motion.md` |

@@ -52,6 +52,21 @@ The sheet shows frame, luma waveform, vectorscope and RGB histogram.
 - **Vectorscope** (bottom left): the cloud should sit around the centre. Pointing towards the orange/red lines = warm, towards blue/cyan = cool; a strong lean on every shot of a video is a cast, a lean that differs between shots is a mismatch.
 - **Histogram**: red, green and blue peaks that sit apart in the shadows or highlights show a colour cast there.
 
+### `color cameras`: match the cameras to each other (several cameras on one trip)
+Phones and action cameras render the same light differently; cutting between them makes the picture jump. `color cameras`
+estimates each camera's colour offset ONLY from clips of two cameras that started within a minute of each other (the same place,
+the same light), keeps an offset only with enough pairs and well above its own uncertainty, and matches the other cameras to the
+one that filmed most of the trip (`--reference "DJI OsmoPocket3"` to choose another). It never touches the light of a scene.
+```
+color cameras --work W                                   # the evidence and the gains (writes W/camera_match.json)
+color cameras --work W --edl video.edl.json --write      # multiply the gains into the shots' corrections (once)
+```
+On the first real trip (iPhone 17 Pro Max, iPhone 15 Pro, DJI Osmo Pocket 3; 130 simultaneous pairs) the iPhone 17 was 5 % redder
+and 8 % less blue than the Osmo. Estimated on day 1 and applied through FFmpeg to day 2, the camera difference fell from 0.135 to
+0.102 (the Osmo-iPhone 17 offset roughly halved; gains are capped at +-12 %). After `color cameras`, `color plan` leaves white
+balance alone unless `--wb` is given (pulling every shot to the median balance would also flatten real differences of light), and
+a later `color plan --overwrite` keeps each shot's camera gain. Look at a frame of each camera after matching (`color scope`).
+
 ## 3. Looks
 `style.grade` (or `shot.grade`): a look name, or an object `{"look": "desert-gold", "strength": 0.8, ...overrides...}`. `color looks` lists them; `color lut --look NAME --out x.cube` exports one as a 3D LUT for other software.
 
