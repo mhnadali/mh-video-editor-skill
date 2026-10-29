@@ -13,6 +13,7 @@ profile.json:
      "banned": ["E:/footage/a.mov"],          # never used
      "favoured": ["E:/footage/b.mov"],        # a little more likely
      "pins": {"E:/footage/c.mov": 12},        # use this clip, in this slot of the storyboard it was pinned in
+     "starts": {"E:/footage/c.mov": 4.2},     # the start the user chose for this clip on the review page
      "history": [{"when": "...", "action": "replace", "slot": 7, "from": 3, "to": 9}]}
 """
 from __future__ import annotations
@@ -32,7 +33,8 @@ ACTIONS = {"keep", "replace", "ban", "prefer-topic", "avoid-topic", "prefer-role
 
 
 def empty() -> dict:
-    return {"version": VERSION, "weights": {}, "topics": {}, "roles": {}, "banned": [], "favoured": [], "pins": {}, "history": []}
+    return {"version": VERSION, "weights": {}, "topics": {}, "roles": {}, "banned": [], "favoured": [], "pins": {}, "starts": {},
+            "history": []}
 
 
 def global_path() -> Path:
@@ -45,7 +47,7 @@ def load(path: str | os.PathLike | None) -> dict:
         return empty()
     data = vl.load_json(path)
     out = empty()
-    for k in ("weights", "topics", "roles", "pins"):
+    for k in ("weights", "topics", "roles", "pins", "starts"):
         if isinstance(data.get(k), dict):
             out[k] = dict(data[k])
     for k in ("banned", "favoured", "history"):
@@ -61,7 +63,7 @@ def load(path: str | os.PathLike | None) -> dict:
 def merge(base: dict, over: dict) -> dict:
     """`over` wins over `base` (project over global)."""
     out = empty()
-    for k in ("weights", "topics", "roles", "pins"):
+    for k in ("weights", "topics", "roles", "pins", "starts"):
         out[k] = {**base.get(k, {}), **over.get(k, {})}
     for k in ("banned", "favoured"):
         out[k] = sorted(set(base.get(k, [])) | set(over.get(k, [])))
@@ -108,6 +110,9 @@ def validate(profile: dict) -> dict:
     for p, slot in profile.get("pins", {}).items():
         if not isinstance(slot, int) or isinstance(slot, bool) or slot < 0:
             raise vl.EngineError(f"profile.pins: the slot of '{p}' must be a whole number >= 0")
+    for p, s in profile.get("starts", {}).items():
+        if not isinstance(s, (int, float)) or isinstance(s, bool) or s < 0:
+            raise vl.EngineError(f"profile.starts: the start of '{p}' must be a number of seconds >= 0")
     for k in ("banned", "favoured"):
         if not all(isinstance(p, str) for p in profile.get(k, [])):
             raise vl.EngineError(f"profile.{k}: a list of file paths")
@@ -216,9 +221,12 @@ def learn(profile: dict, storyboard: dict, feedback: dict, inventory: list, view
             raise vl.EngineError(f"feedback: clip {i} is not in the inventory")
         return by_idx[i]["path"]
 
+    changed: set = set()                                          # slots whose clip changed
+
     def take(row, nv, kind, why):
         row.pop("moment", None)                                   # it described the old clip
         row.pop("banned", None)
+        changed.add(row["slot"])
         row.update(clip=nv["index"], name=nv["name"], taken=nv["taken"], device=nv["device"], role=nv["role"], size=nv["size"],
                    people=nv["people"], topic=nv["topic"], energy=round(nv["act"], 2), path=nv["path"],
                    start=round(nv["best_start"], 2), start_kind=kind, why=why)
@@ -274,6 +282,9 @@ def learn(profile: dict, storyboard: dict, feedback: dict, inventory: list, view
                 row.pop("moment", None)
                 row["start"] = round(float(d["start"]), 2)
                 row["start_kind"] = "set by the user"
+                prof["starts"] = {p: s for p, s in prof["starts"].items() if norm(p) != norm(row["path"])}
+                prof["starts"][row["path"]] = row["start"]                  # remembered: the next `story select` uses it
+                prof["pins"][row["path"]] = row["slot"]                     # choosing its start means keeping the clip
                 entry.update(slot=row["slot"], start=row["start"])
         elif act == "keep":
             row = slot_row(d.get("slot"))
@@ -311,13 +322,25 @@ def learn(profile: dict, storyboard: dict, feedback: dict, inventory: list, view
             was = row["clip"]
             take(row, views[alt], "alternate after a ban", f"alternate: clip {was} was banned")
             row["alternates"] = [a for a in row["alternates"] if a != alt]
+    # "looks like slot N" notes no longer hold for a slot whose clip changed (the other side is not known any more)
+    for row in rows:
+        if row["slot"] in changed:
+            row["lookalike"] = []
+        elif row.get("lookalike"):
+            row["lookalike"] = [s for s in row["lookalike"] if s not in changed]
     validate(prof)
     return prof, rows
 
 
+def start_of(profile: dict, path: str) -> Optional[float]:
+    """The start the user chose for this clip, or None."""
+    starts = {norm(p): s for p, s in (profile or {}).get("starts", {}).items()}
+    return starts.get(norm(path))
+
+
 def load_dict(profile: dict) -> dict:
     out = empty()
-    for k in ("weights", "topics", "roles", "pins"):
+    for k in ("weights", "topics", "roles", "pins", "starts"):
         out[k] = dict(profile.get(k, {}))
     for k in ("banned", "favoured", "history"):
         out[k] = list(profile.get(k, []))
@@ -333,5 +356,6 @@ def describe(profile: dict) -> str:
     if profile["weights"]:
         lines.append("weights: " + ", ".join(f"{k}={v}" for k, v in sorted(profile["weights"].items())))
     lines.append(f"{len(profile['banned'])} banned, {len(profile['favoured'])} favoured, {len(profile['pins'])} pinned, "
+                 f"{len(profile.get('starts', {}))} start(s) chosen, "
                  f"{len(profile['history'])} decisions remembered")
     return "\n".join(lines)

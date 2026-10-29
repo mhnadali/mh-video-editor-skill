@@ -287,9 +287,13 @@ def want_for(row: dict) -> str:
     return "any"
 
 
+KEEP_START = ("set by the user", "as approved")      # starts that `story refine` must not move
+
+
 def refine_storyboard(sb: dict, inventory: list, scores: dict, work: str | os.PathLike, workers: int = 4,
                       log=lambda *_: None) -> dict:
-    """Replace each row's start with the best moment of its clip (a copy of `sb` with `moment` details on every row)."""
+    """Replace each row's start with the best moment of its clip (a copy of `sb` with `moment` details on every row). A start
+    the user set on the review page, or one carried over from an approved storyboard (a cut-down), is kept."""
     wk = Path(work)
     by = {r["index"]: r for r in inventory}
     rows = [dict(r) for r in sb["rows"]]
@@ -312,9 +316,11 @@ def refine_storyboard(sb: dict, inventory: list, scores: dict, work: str | os.Pa
         if seg is None:
             row["moment"] = {"error": err}
             continue
+        row["moment"] = seg
+        if row.get("start_kind") in KEEP_START:
+            continue                                  # the user chose this start (review page) or approved it: analysed, not moved
         if abs(seg["start"] - row["start"]) > 0.1:
             changed += 1
-        row["moment"] = seg
         row["start"] = seg["start"]
         row["start_kind"] = f"refined moment ({seg['motion_type']})"
     out = dict(sb)

@@ -75,7 +75,8 @@ def usable(rec: dict, score: Optional[dict], note: Optional[dict] = None, cfg: O
     if must:                                           # the user's insistence overrides the soft reasons, never the length rule
         return [w for w in why if w in ("skipped", "short")]
     if not score or "quality" not in score:
-        why.append("not-scored")
+        if "short" not in why:                        # a short clip is not measured on purpose (`score --min-duration`)
+            why.append("not-scored")
         return why
     flags = score.get("flags") or []
     for fl in f["block_flags"]:

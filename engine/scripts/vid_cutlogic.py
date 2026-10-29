@@ -105,6 +105,9 @@ def override_score(score: Optional[dict], note: Optional[dict]) -> dict:
     size = n.get("shot_size")
     if size:
         out["shot_size"] = "close" if size == "detail" else size
+        out["shot_size_from"] = "notes"
+    elif out.get("shot_size"):
+        out["shot_size_from"] = "measured"            # 63 % agreement with sizes judged by eye (docs/CALIBRATION.md)
     f = shot_features(score, note)
     if n.get("motion_dir"):
         out["motion_dx"], out["motion_dy"], out["motion_mag"] = f["dx"], f["dy"], f["mag"]

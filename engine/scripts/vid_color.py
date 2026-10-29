@@ -743,6 +743,15 @@ def plan_corrections(edl: dict, work: str | os.PathLike, strength: float = 0.8, 
     return out
 
 
+def _is_only_gain(correct: dict | None, gain: list) -> bool:
+    """True when a shot's correction is the identity apart from exactly this gain."""
+    c = normalize_correction(correct) if correct else None
+    if not c or c.get("secondary"):
+        return False
+    rest = dict(c, gain=[1.0, 1.0, 1.0])
+    return is_identity_correction(rest) and all(abs(a - b) < 1e-4 for a, b in zip(c["gain"], gain))
+
+
 def apply_plan(edl: dict, plan: dict, overwrite: bool = False) -> int:
     """Write planned corrections into the EDL shots (skips shots that already have one unless overwrite). A shot whose camera
     was matched (`color cameras`) keeps its camera gain on top of the new correction."""
@@ -750,17 +759,21 @@ def apply_plan(edl: dict, plan: dict, overwrite: bool = False) -> int:
     n = 0
     for j, item in plan.items():
         shot = edl["shots"][j]
-        if shot.get("correct") is not None and not overwrite:
-            continue
         cam = vid_camera.camera_gain_of(edl, j)
+        # a correction that is nothing but the camera gain of `color cameras` does not count as one: the shot still gets its
+        # exposure / levels correction (otherwise matching the cameras first would block every other correction of those shots)
+        only_camera = bool(cam) and _is_only_gain(shot.get("correct"), cam)
+        if shot.get("correct") is not None and not overwrite and not only_camera:
+            continue
         new = item["correct"]
         if cam:
             base = dict(new) if new else {k: (list(v) if isinstance(v, list) else v) for k, v in IDENTITY_CORRECTION.items()}
             base["gain"] = [round(clamp(a * b, 0.5, 2.0), 4) for a, b in zip(base["gain"], cam)]
             new = normalize_correction(base)
         if new:
+            if new != shot.get("correct"):
+                n += 1
             shot["correct"] = new
-            n += 1
         elif "correct" in shot and overwrite:
             del shot["correct"]
     return n

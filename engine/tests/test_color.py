@@ -479,8 +479,20 @@ class Proposals(unittest.TestCase):
         self.assertEqual(vc.apply_plan(edl, plan), 1)
         self.assertEqual(edl["shots"][0]["correct"], {"ev": 0.3})
         self.assertEqual(edl["shots"][1]["correct"], {"ev": 0.1})
-        self.assertEqual(vc.apply_plan(edl, plan, overwrite=True), 2)
+        self.assertEqual(vc.apply_plan(edl, plan, overwrite=True), 1, "only shot 1 changes: shot 0 already holds the same correction")
         self.assertEqual(edl["shots"][1]["correct"], {"ev": 0.4})
+        self.assertEqual(vc.apply_plan(edl, plan, overwrite=True), 0, "nothing changes the second time")
+
+    def test_a_shot_with_only_its_camera_gain_still_gets_its_correction(self):
+        edl = {"shots": [{"clip": "a", "correct": {"ev": 0.0, "black": 0.0, "white": 1.0, "gamma": 1.0, "gain": [1.1, 1.0, 0.9]}},
+                         {"clip": "b", "correct": {"ev": 0.2, "black": 0.0, "white": 1.0, "gamma": 1.0, "gain": [1.1, 1.0, 0.9]}}],
+               "camera_match": {"gains": {"DJI": [1.1, 1.0, 0.9]}, "shots": {"0": "DJI", "1": "DJI"}}}
+        plan = {0: {"correct": {"ev": 0.3, "black": 0.0, "white": 1.0, "gamma": 1.0, "gain": [1.0, 1.0, 1.0]}},
+                1: {"correct": {"ev": 0.4, "black": 0.0, "white": 1.0, "gamma": 1.0, "gain": [1.0, 1.0, 1.0]}}}
+        self.assertEqual(vc.apply_plan(edl, plan), 1)
+        self.assertEqual(edl["shots"][0]["correct"]["ev"], 0.3)
+        self.assertEqual(edl["shots"][0]["correct"]["gain"], [1.1, 1.0, 0.9], "the camera gain stays")
+        self.assertEqual(edl["shots"][1]["correct"]["ev"], 0.2, "a shot with its own correction is left alone")
 
 
 @NEEDS_FF

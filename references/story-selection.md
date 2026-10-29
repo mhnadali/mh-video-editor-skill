@@ -104,6 +104,11 @@ real trip a 15 s cut of the approved 45 s storyboard kept 11 of 35 shots, all in
 against 0.76 for the dropped ones), and left out three light chapters. Other aspect ratios come from the render
 (`render --format` / `--all-formats`, see `formats.md`). Show the cut-down's storyboard before rendering it.
 
+A start chosen with *Start here* is remembered in `profile.json` (and pins the clip): the next `story select` keeps that clip
+at that start, and `story refine` never moves a start the user chose or approved. A storyboard refers to clips by inventory
+number; when clips are added and `probe` runs again, `refine`, `review` and `--cut-from` find the storyboard's clips again by
+their paths (alternates are dropped), and `story feedback` refuses decisions that were made on the old numbers.
+
 ### Taste across projects
 `story profile --work W --promote` adds the project's topic and role biases (averaged with what the global profile holds) and its
 weights to the global profile (`~/.mh-video-skill/profile.json`, or `MH_PROFILE`); clip decisions (banned, favoured, pinned)

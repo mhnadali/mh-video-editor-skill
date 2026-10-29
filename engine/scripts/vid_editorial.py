@@ -385,14 +385,20 @@ def editorial_issues(edl: dict, feats: list[dict], bounds: list[int], trans: dic
     out: list[dict] = []
     n = len(edl.get("shots") or [])
     sizes = [(feats[j].get("shot_size") if j < len(feats) and feats[j] else None) for j in range(n)]
-    # three or more shots of the same size in a row: coverage lacks variety
+    judged = [not (j < len(feats) and feats[j] and feats[j].get("shot_size_from") == "measured") for j in range(n)]
+    # three or more shots of the same size in a row: coverage lacks variety. Measured sizes are only wide / medium and agree
+    # with the eye 63 % of the time, so a run that the notes do not confirm is only mentioned, from four shots on
     run = 1
     for j in range(1, n):
         if sizes[j] is not None and sizes[j] == sizes[j - 1]:
             run += 1
-            if run >= 3:
+            if run >= 3 and all(judged[j - run + 1:j + 1]):
                 out.append(_issue("warn", "shot-size-repeat",
                                    f"shots {j - 2}-{j} are all '{sizes[j]}' shots; vary shot size for coverage"))
+            elif run == 4 and not all(judged[j - 3:j + 1]):
+                out.append(_issue("info", "shot-size-repeat",
+                                   f"shots {j - 3}-{j} measure as '{sizes[j]}' shots (a measurement, not your notes): check the "
+                                   "sheets and vary the size if they really are alike"))
         else:
             run = 1
     # jump cut: a hard cut between two look-alike shots of the same size
