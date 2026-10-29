@@ -30,6 +30,7 @@ Exit code 0 = PASS or PASS WITH WARNINGS, 1 = FAIL (`--strict`: 1 on warnings to
 | magenta-cast / green-cast | warn (1-2 s), error (3+ s) | mean U and V of one second both above 134 (magenta) or both below 106 (green) | the v3 purple bug; warm orange (U low, V high) is not flagged |
 | frozen | warn | frame difference < 0.02 for 0.5 s or more, outside the fades | a clip shorter than its shot |
 | cut-timing | error if median offset >= 2 frames, warn if >= 1 or worst > 2 | peak of the scene score within +-6 frames of each planned hard cut | xfade offset or beat-drift bugs; skipped (info) when neighbours look alike |
+| beat-sync | warn if the median distance is over 0.045 s (6 cuts or more) | the strongest onset of the rendered sound within a quarter beat of each cut planned on a beat | beat times that do not match the music: cut-timing compares the cuts with the EDL's own grid and cannot see it (the 0.23 % error of 0.25: the earlier Kavir final measured 0.048 s, the corrected one 0.033 s with the other sign) |
 | cut-detection | warn | more than half of the planned hard cuts show no scene change at all | look-alike neighbouring shots: the cut cannot be verified |
 | loudness | warn | outside target -3 / +2 LU (default target -14 LUFS) | riser/boom pushed the mix 2 LU hot |
 | true-peak | warn above -1.0, error above -0.1 dBFS | | clipping; platforms re-encode louder |
