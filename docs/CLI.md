@@ -8,6 +8,7 @@ Exit codes: 0 = success; 1 = a check failed (QA FAIL, lint errors, verify failed
 | Command | What it does |
 |---|---|
 | [`doctor`](#doctor) | check FFmpeg, filters, encoders and optional features |
+| [`prepare`](#prepare) | from a footage folder and a song to the storyboard review page in one go (each step cached) |
 | [`probe`](#probe) | inventory a footage folder (duration, rotation, fps, HDR, duplicates) |
 | [`sheets`](#sheets) | numbered contact sheets of the inventory (look at them to choose shots) |
 | [`score`](#score) | measure sharpness, exposure and motion of every clip; best window; same-scene hashes |
@@ -28,6 +29,7 @@ Exit codes: 0 = success; 1 = a check failed (QA FAIL, lint errors, verify failed
 | [`sfx`](#sfx) | sound design and ambient bed |
 | [`audio`](#audio) | the footage's own sound: measure it, and a page to check it by ear |
 | [`music`](#music) | fit the music to the edit: end on the song's own ending |
+| [`clean`](#clean) | what the work folder holds and, with --yes, delete what can be made again (old parts, proxies) |
 
 ## `doctor`
 
@@ -36,6 +38,29 @@ Check FFmpeg, filters, encoders and optional features.
 ```
 mh_video doctor [-h]
 ```
+
+## `prepare`
+
+From a footage folder and a song to the storyboard review page in one go (each step cached).
+
+```
+mh_video prepare [-h] --footage FOOTAGE --music MUSIC --work WORK --duration DURATION [--chapters CHAPTERS] [--notes NOTES] [--variant {balanced,action,people}] [--recursive] [--utc-offset UTC_OFFSET] [--clock-shift DEVICE=MINUTES] [--no-drop] [--until {probe,score,vision,beats,audio,chapters,select,refine,review}]
+```
+
+| Argument | Required / default | Meaning |
+|---|---|---|
+| `--footage FOOTAGE` | required | the footage folder |
+| `--music MUSIC` | required | the song |
+| `--work WORK` | required | work folder (inventory, scores, sheets, beats live here) |
+| `--duration DURATION` | required | video length in seconds |
+| `--chapters CHAPTERS` |  | chapters.json (default <work>/chapters.json; a draft is made and the run stops if there is none) |
+| `--notes NOTES` |  | shot-notes.json: the agent's reading of the footage |
+| `--variant VARIANT` | default `balanced`; one of `balanced`, `action`, `people` | which variant to refine and review |
+| `--recursive` |  | also scan sub-folders |
+| `--utc-offset UTC_OFFSET` | default `3.5` | as in `probe`: hours added to a camera's UTC time (Iran 3.5) |
+| `--clock-shift DEVICE=MINUTES` |  | as in `probe` (default: the corrections the existing inventory was made with) |
+| `--no-drop` |  | do not start the beat-by-beat body at the music's drop |
+| `--until UNTIL` | one of `probe`, `score`, `vision`, `beats`, `audio`, `chapters`, `select`, `refine`, `review` | stop after this step |
 
 ## `probe`
 
@@ -724,3 +749,17 @@ mh_video music fit [-h] --beats BEATS [--duration DURATION] [--edl EDL] [--choos
 | `--preview PREVIEW` |  | folder: write a short audio file per candidate join to listen to |
 | `--write` |  | store the chosen join in the EDL (otherwise only print the table) |
 | `--top TOP` | default `6` | how many candidates to show (default 6) |
+
+## `clean`
+
+What the work folder holds and, with --yes, delete what can be made again (old parts, proxies).
+
+```
+mh_video clean [-h] --work WORK [--days DAYS] [--yes]
+```
+
+| Argument | Required / default | Meaning |
+|---|---|---|
+| `--work WORK` | required | work folder (inventory, scores, sheets, beats live here) |
+| `--days DAYS` | default `14.0` | only files untouched this long (default 14) |
+| `--yes` |  | really delete (default: a dry run that only reports) |

@@ -313,6 +313,137 @@ def cmd_audio(a) -> int:
     return 0
 
 
+def _fingerprint(paths) -> str:
+    import hashlib
+    rows = []
+    for p in sorted(str(x) for x in paths):
+        try:
+            st = os.stat(p)
+            rows.append([p, st.st_size, int(st.st_mtime)])
+        except OSError:
+            rows.append([p, None, None])
+    return hashlib.sha1(json.dumps(rows).encode()).hexdigest()[:16]
+
+
+def inventory_shifts(inventory: list) -> list:
+    """The `--clock-shift DEVICE=MINUTES` values an inventory was made with (a re-probe must not lose them: the Kavir Osmo is
+    -30 minutes, and without it the trip's order breaks)."""
+    known = {}
+    for r in inventory:
+        if r.get("clock_shift_min") and r.get("device"):
+            known[r["device"]] = int(r["clock_shift_min"])
+    return [f"{d}={v}" for d, v in sorted(known.items())]
+
+
+PREPARE_STEPS = ("probe", "score", "vision", "beats", "audio", "chapters", "select", "refine", "review")
+
+
+def cmd_prepare(a) -> int:
+    """From a footage folder and a song to the storyboard review page, each step skipped when its result is up to date."""
+    import time
+    import vid_beats
+    import vid_probe
+    import vid_vision
+    work = Path(a.work)
+    work.mkdir(parents=True, exist_ok=True)
+    state_path = work / "pipeline.json"
+    state = vl.load_json(state_path) if state_path.is_file() else {}
+    parser = build_parser()
+    done: list = []
+    until = a.until or PREPARE_STEPS[-1]
+
+    def run(name, argv=None, skip=None):
+        t = time.time()
+        if skip:
+            done.append({"step": name, "seconds": 0.0, "note": skip})
+            print(f"== {name}: skipped ({skip})")
+        else:
+            print(f"== {name}")
+            sub = parser.parse_args(argv)
+            sub.fn(sub)
+            done.append({"step": name, "seconds": round(time.time() - t, 1)})
+        return name == until
+
+    def finish(message):
+        state["steps"] = done
+        vl.save_json(state_path, state)
+        width = max(len(d["step"]) for d in done) if done else 4
+        print("\n" + "\n".join(f"  {d['step']:<{width}} {d['seconds']:>7.1f} s  {d.get('note', '')}" for d in done))
+        print(f"  {'total':<{width}} {sum(d['seconds'] for d in done):>7.1f} s")
+        print(message)
+        return 0
+
+    media = vid_probe.list_media(a.footage, a.recursive)
+    footage_fp = _fingerprint(media)
+    inv_path = work / "inventory.json"
+    old_inv = vid_probe.load_inventory(work) if inv_path.is_file() else []
+    up = inv_path.is_file() and (state.get("footage") == footage_fp or (
+        "footage" not in state and {(os.path.normcase(str(Path(r["path"]).resolve())), r.get("size")) for r in old_inv}
+        == {(os.path.normcase(str(Path(p).resolve())), os.stat(p).st_size) for p in media}))
+    shifts = list(a.clock_shift or []) or inventory_shifts(old_inv)   # a re-probe keeps the inventory's clock corrections
+    probe_args = (["probe", a.footage, "--work", str(work), "--utc-offset", str(a.utc_offset)] + (["--recursive"] if a.recursive else [])
+                  + [x for sh in shifts for x in ("--clock-shift", sh)])
+    if shifts and not up:
+        print(f"camera clock corrections: {', '.join(shifts)}")
+    if run("probe", probe_args, "the footage has not changed" if up else None):
+        return finish(f"stopped after probe ({state_path})")
+    state["footage"] = footage_fp
+    if run("score", ["score", "--work", str(work), "--min-duration", "5"]):
+        return finish("stopped after score")
+    if run("vision", ["vision", "run", "--work", str(work)],
+           None if vid_vision.plugin_python() else "the vision plug-in is not set up (python plugins/vision/setup.py)"):
+        return finish("stopped after vision")
+    beats_path = work / "beats.json"
+    music_fp = _fingerprint([a.music])
+    old_beats = vl.load_json(beats_path) if beats_path.is_file() else None
+    fresh = old_beats and state.get("music") == music_fp and not vid_beats.stale(old_beats)
+    if run("beats", ["beats", a.music, "--out", str(beats_path)], "the music has not changed" if fresh else None):
+        return finish("stopped after beats")
+    state["music"] = music_fp
+    if run("audio", ["audio", "scan", "--work", str(work)]):
+        return finish("stopped after audio")
+    chapters = Path(a.chapters or work / "chapters.json")
+    if not chapters.is_file():
+        run("chapters", ["story", "chapters", "--work", str(work), "--out", str(chapters)])
+        return finish(f"NEEDS_INPUT: {chapters} is a draft. Look at the footage (sheets --only RANGE --frames 3), name the chapters, "
+                      "set their weights and energy, write shot-notes.json, then run `prepare` again.")
+    done.append({"step": "chapters", "seconds": 0.0, "note": f"using {chapters}"})
+    if until == "chapters":
+        return finish("stopped after chapters")
+    beats = vl.load_json(beats_path)
+    sb = work / "storyboard.json"
+    sel = ["story", "select", "--work", str(work), "--beats", str(beats_path), "--chapters", str(chapters), "--duration", str(a.duration),
+           "--variants", "--out", str(sb)]
+    if beats.get("drop") is not None and not a.no_drop:
+        sel += ["--body-start", str(beats["drop"])]
+    notes = ["--notes", a.notes] if a.notes else []
+    if run("select", sel + notes):
+        return finish("stopped after select")
+    chosen = sb.with_name(f"{sb.stem}.{a.variant}.json")
+    refined = sb.with_name(f"{sb.stem}.refined.json")
+    if run("refine", ["story", "refine", "--work", str(work), "--storyboard", str(chosen), "--out", str(refined)]):
+        return finish("stopped after refine")
+    run("review", ["story", "review", "--work", str(work), "--storyboard", str(refined), "--beats", str(beats_path)] + notes)
+    state["storyboard"] = str(refined)
+    return finish(f"NEEDS_APPROVAL: show the user {work / 'review.html'} (the {a.variant} variant; the others are next to it) and wait "
+                  "for approval before `plan`. Their decisions: `story feedback`.")
+
+
+def cmd_clean(a) -> int:
+    import vid_deliver
+    rep = vid_deliver.workspace(a.work, a.days)
+    for row in rep["rows"]:
+        print(f"  {row['kind']:<16} {row['mb']:>9.1f} MB  {row['files']:>6} files  {row['old_mb']:>9.1f} MB older than {a.days:g} days"
+              + ("" if row["deletable"] else "  (kept: not made again from the footage)"))
+    print(f"  {'total':<16} {rep['mb']:>9.1f} MB; can be freed: {rep['freeable_mb']:.1f} MB")
+    if not a.yes:
+        print("a dry run: nothing deleted (add --yes to delete the old render parts, proxies, excerpts and analysis caches)")
+        return 0
+    res = vid_deliver.clean_workspace(a.work, a.days)
+    print(f"deleted {res['removed']} files, {res['freed_bytes'] / 1e6:.1f} MB")
+    return 0
+
+
 def _warn_stale(beats) -> None:
     import vid_beats
     msg = vid_beats.stale(beats)
@@ -837,6 +968,23 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--beats-per-bar", type=int, default=4, help="beats per bar for the downbeat grid (4 = common time, 3 = waltz)")
     p.add_argument("--first-beat", type=float, help="time in seconds of the first beat (overrides the detected phase)")
     p.set_defaults(fn=cmd_beats)
+    p = sub.add_parser("prepare", help="from a footage folder and a song to the storyboard review page in one go (each step cached)")
+    p.add_argument("--footage", required=True, help="the footage folder"); p.add_argument("--music", required=True, help="the song")
+    p.add_argument("--work", required=True); p.add_argument("--duration", type=float, required=True, help="video length in seconds")
+    p.add_argument("--chapters", help="chapters.json (default <work>/chapters.json; a draft is made and the run stops if there is none)")
+    p.add_argument("--notes", help="shot-notes.json: the agent's reading of the footage")
+    p.add_argument("--variant", default="balanced", choices=["balanced", "action", "people"], help="which variant to refine and review")
+    p.add_argument("--recursive", action="store_true")
+    p.add_argument("--utc-offset", type=float, default=3.5, help="as in `probe`: hours added to a camera's UTC time (Iran 3.5)")
+    p.add_argument("--clock-shift", action="append", metavar="DEVICE=MINUTES",
+                   help="as in `probe` (default: the corrections the existing inventory was made with)")
+    p.add_argument("--no-drop", action="store_true", help="do not start the beat-by-beat body at the music's drop")
+    p.add_argument("--until", choices=list(PREPARE_STEPS), help="stop after this step")
+    p.set_defaults(fn=cmd_prepare)
+    p = sub.add_parser("clean", help="what the work folder holds and, with --yes, delete what can be made again (old parts, proxies)")
+    p.add_argument("--work", required=True); p.add_argument("--days", type=float, default=14.0, help="only files untouched this long (default 14)")
+    p.add_argument("--yes", action="store_true", help="really delete (default: a dry run that only reports)")
+    p.set_defaults(fn=cmd_clean)
     p = sub.add_parser("audio", help="the footage's own sound: measure it, and a page to check it by ear")
     asub = p.add_subparsers(dest="action", required=True)
     q = asub.add_parser("scan", help="measure the sound of every clip (voices, wind, rumble, quiet, clipped) into <work>/audio.json")

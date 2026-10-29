@@ -5,7 +5,7 @@ behind the MP4 export / size-reduction layer, and hand-off notes for continuing 
 
 ## State
 
-Version **0.26.0**. Standard-library Python over FFmpeg (plus an optional, separately installed vision plug-in), 830+ tests on
+Version **0.27.0**. Standard-library Python over FFmpeg (plus an optional, separately installed vision plug-in), 830+ tests on
 synthetic media, and since 0.17 every selection change is measured against a real trip (486 clips, three cameras, two days;
 numbers in `docs/CALIBRATION.md`).
 
@@ -22,7 +22,9 @@ offline review page, an evaluation harness; then a deep review that fixed twelve
 - **J, the sound (0.26):** the beat analysis' 0.23 % time-scale error fixed; clip sound measured (voices, wind, engines, clipping)
   and windy or clipped ambient left out; `music fit` ends on the song's own ending with the beats kept; a listening page and
   `calibrate_audio.py` (the thresholds wait for the user's ears).
-- Next: K content understanding (0.27); L workflow and speed (0.28); M reliability (0.29); 1.0 on a second real project.
+- **L, workflow and speed (0.27):** `prepare` (footage to review page, every step cached, 2 s warm on the real project), `clean`,
+  frame strips reused (a review rebuild 13.7 s -> 0.3 s).
+- Next: M reliability (0.28); K content understanding, after the owner approves the model download; 1.0 on a second real project.
 
 ## Real-footage arc (0.17 - 0.23, phases A - G)
 - **A, validation (0.17):** the picture hashes were one frame repeated (fixed, scores repaired in place); same-moment strictness

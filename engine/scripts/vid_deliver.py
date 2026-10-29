@@ -228,3 +228,58 @@ def gc_cache(workdir: str | os.PathLike, keep_days: float = 14.0) -> dict:
             p.unlink(missing_ok=True)
             removed += 1
     return {"removed": removed, "freed_bytes": freed}
+
+
+# What a work folder holds, by kind. Only what is made again from the footage by a later step may be deleted; the inventory,
+# scores, beats, storyboards, decisions and anything the user wrote are never touched.
+WORKSPACE_KINDS = (
+    ("render parts", lambda p: "parts" in p.parts or "parts_preview" in p.parts, True),
+    ("review proxies", lambda p: any(x.endswith("_media") for x in p.parts[:-1]) and p.suffix in (".mp4", ".m4a", ".jpg"), True),
+    ("moment analysis", lambda p: "moments" in p.parts, True),
+    ("luts and text", lambda p: "luts" in p.parts or "text" in p.parts, True),
+    ("audio masters", lambda p: p.name.startswith(("master_", "music_edit_")) and p.suffix == ".wav", True),
+    ("videos", lambda p: p.suffix.lower() in (".mp4", ".mov", ".mkv"), False),
+    ("other", lambda p: True, False),
+)
+
+
+def _kind(p: Path) -> tuple:
+    for name, test, deletable in WORKSPACE_KINDS:
+        if test(p):
+            return name, deletable
+    return "other", False
+
+
+def workspace(workdir: str | os.PathLike, keep_days: float = 14.0) -> dict:
+    """Sizes by kind, how much is older than `keep_days`, and how much of that may be deleted."""
+    import time
+    work = Path(workdir)
+    cutoff = time.time() - keep_days * 86400
+    rows: dict = {}
+    for p in work.rglob("*"):
+        if not p.is_file():
+            continue
+        name, deletable = _kind(p.relative_to(work))
+        st = p.stat()
+        r = rows.setdefault(name, {"kind": name, "mb": 0.0, "files": 0, "old_mb": 0.0, "deletable": deletable})
+        r["mb"] += st.st_size / 1e6
+        r["files"] += 1
+        if st.st_mtime < cutoff:
+            r["old_mb"] += st.st_size / 1e6
+    order = [k for k, _t, _d in WORKSPACE_KINDS]
+    out = sorted(rows.values(), key=lambda r: order.index(r["kind"]))
+    return {"rows": out, "mb": sum(r["mb"] for r in out), "freeable_mb": sum(r["old_mb"] for r in out if r["deletable"])}
+
+
+def clean_workspace(workdir: str | os.PathLike, keep_days: float = 14.0) -> dict:
+    """Delete the deletable kinds of files untouched for `keep_days` days."""
+    import time
+    work = Path(workdir)
+    cutoff = time.time() - keep_days * 86400
+    removed, freed = 0, 0
+    for p in list(work.rglob("*")):
+        if p.is_file() and _kind(p.relative_to(work))[1] and p.stat().st_mtime < cutoff:
+            freed += p.stat().st_size
+            p.unlink(missing_ok=True)
+            removed += 1
+    return {"removed": removed, "freed_bytes": freed}

@@ -2,6 +2,21 @@
 
 All notable changes to this project. Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [SemVer](https://semver.org/).
 
+## [0.27.0] - 2026-10-29 (phase L: workflow and speed)
+
+### Added
+- `prepare`: from a footage folder and a song to the storyboard review page in one command (probe, score, vision if set up, beats,
+  audio scan, select, refine, review), every step skipped or cached when its result is up to date, timings per step in
+  `<work>/pipeline.json`. Stops at `NEEDS_INPUT` with a chapters draft when there is no chapters.json, at `NEEDS_APPROVAL` with the
+  review page otherwise; `--until STEP` stops earlier. A re-probe keeps the inventory's camera clock corrections, and the probe is
+  skipped when the inventory already matches the folder.
+- `clean`: what the work folder holds by kind and how much of it can be made again; `--yes` deletes only old render parts, review
+  proxies and strips, moment caches, LUTs and audio masters (never the inventory, scores, beats, storyboards, decisions or videos).
+
+### Changed
+- The review page keeps its frame strips next to the proxies: a rebuild after feedback takes 0.3 s instead of 13.7 s (35 shots).
+- Phase K (the content model) waits for the owner's approval of its download; L and M come first.
+
 ## [0.26.0] - 2026-10-29 (phase J: the sound)
 
 ### Fixed
