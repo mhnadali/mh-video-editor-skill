@@ -259,12 +259,15 @@ def _note(notes: dict, rec: dict) -> dict:
 
 def _people_certainty(note: dict, score: dict) -> float:
     """How sure we are that a person is in the clip: 1.0 when the agent's note says so (`people` true, or role portrait), 0.6 for
-    a face in several frames of the local vision plug-in, 0.25 for a weaker sighting; 0 for no person. The classic face detector
-    is right about half the time on desert footage (see plugins/vision/README.md), so it only counts for part of a person."""
+    a face in several frames of the local vision plug-in, 0.25 for a weaker sighting; 0 for no person. With the YuNet model the
+    numbers are 0.9 and 0.6 (measured on a real trip, see docs/CALIBRATION.md); the classic cascades are right about half the
+    time on desert footage, so they only count for part of a person."""
     if "people" in note:
         return 1.0 if (note["people"] or note.get("role") == "portrait") else 0.0
     if note.get("role") == "portrait":
         return 1.0
+    if score.get("person_certainty") is not None:          # set by the vision merge from the detector's measured reliability
+        return float(score["person_certainty"])
     if score.get("person_sure"):
         return 0.6
     if score.get("person"):
@@ -281,6 +284,8 @@ def clip_view(rec: dict, score: dict, note: dict) -> dict:
     mood = note.get("mood")
     act = MOODS[mood] if mood in MOODS else (score.get("energy") or 0.0) / 100.0
     size = note.get("shot_size") or score.get("shot_size")
+    if not note.get("shot_size") and (score.get("face_area") or 0.0) >= 0.05 and (score.get("person_certainty") or 0.0) >= 0.6:
+        size = "close"                          # a large face fills the frame: a close-up (the pixels alone cannot tell)
     size = "close" if size == "detail" else size
     wins = score.get("wins") or []
     action_start = max(wins, key=lambda w: w[2])[0] if wins else score.get("best_start", 0.0)
@@ -1006,6 +1011,17 @@ def audit_edl(edl: dict, inventory: list, scores: dict, beats: Optional[dict] = 
         if r is not None and r < 0.1:
             findings.append({"level": "warn", "code": "energy-curve",
                              "msg": f"the energy of the pictures does not follow the music (correlation {r:.2f})"})
+    # the drop: the first shot after the music lands is the biggest moment of the reel and must be a strong picture
+    if beats and beats.get("drop") is not None:
+        drop = float(beats["drop"])
+        at_drop = [(v, t) for v, (t, _ln) in known if abs(t - drop) <= 0.15]
+        if at_drop:
+            v, t = at_drop[0]
+            stats["drop_shot"] = {"clip": v["index"], "energy": round(v["act"], 2), "role": v["role"]}
+            if v["act"] < 0.5 and v["role"] != "action":
+                findings.append({"level": "warn", "code": "drop-weak",
+                                 "msg": f"{t:.1f}s: the shot on the drop (clip {v['index']}) is calm (energy {v['act']:.2f}"
+                                        f"{', ' + v['role'] if v['role'] else ''}); the loudest moment needs the strongest picture"})
     # reading time
     for v, (t, ln) in known:
         if ln < 0.9 and (v["size"] == "wide" or v["people"] or v["role"] in ("portrait", "establishing")):

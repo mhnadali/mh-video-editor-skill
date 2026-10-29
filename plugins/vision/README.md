@@ -9,12 +9,12 @@ Finds people and faces in the footage so the story-first selection can count the
   body, full body). A scene classifier is used only if you give it an ONNX file of your own (`--onnx`, `--labels`).
 - **Run it:** `python engine/scripts/mh_video.py vision run --work <work-dir>` writes `<work-dir>/vision.json`. `story select`,
   `story exclusions` and the review page read it automatically.
-- **How good is it? Honestly: a weak hint.** Measured against 60 clips of a real desert trip that were labelled by looking at three
-  frames of each (a sample with a share of every kind of verdict; 413 clips were looked at): a face or body in any frame (`person`)
-  finds about 80 % of the clips with people but is right only about 40 % of the time on the whole trip; a face in three or more
-  frames (`person_sure`) is right 60 % of the time and finds a third to a half of the people. Clouds, mirrors, grills and food
-  counters fool the cascades, and they miss small, turned-away or shadowed people. An earlier check on 34 clips had suggested 92 %;
-  it was too small and too easy. So the engine counts a sighting only as part of a person (60 % for `person_sure`, 25 % for the
-  rest) and the storyboard reports how many shots with people are confirmed by the agent's notes. The agent's own `people` / `role`
-  notes always win. A better detector (your own ONNX model) is the way to improve this; see `docs/CALIBRATION.md` to measure it.
+- **Better detector (optional): YuNet.** `python plugins/vision/setup.py --model` downloads the 232 KB MIT-licensed YuNet face
+  detector once into `plugins/vision/models/` (SHA-256 checked, git-ignored); afterwards everything is offline and `vision run` uses
+  it automatically. On 60 clips of a real trip labelled by eye it is right 83 % of the time and finds 71 % of the people (`person`),
+  and 100 % / 71 % for `person_sure` (a face in two or more frames, larger than 0.5 % of the frame). Without the model the plug-in
+  falls back to the classic Haar cascades, which were measured at 34-63 % precision on the same clips (clouds, mirrors, grills and
+  food counters fool them; an earlier check on 34 easy clips had suggested 92 %). The engine counts each detector as part of a
+  person according to those numbers and reports how many shots with people are confirmed by the agent's notes, which always win.
+  See `docs/CALIBRATION.md` to measure it on your own footage.
 - **Requirements:** OpenCV 4.x (OpenCV 5 removed the cascade classifier, so `requirements.txt` pins `<5`).

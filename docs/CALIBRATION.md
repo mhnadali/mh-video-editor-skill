@@ -37,3 +37,14 @@ duplicate. Put the settings you adopt in `chapters.json` under `dedupe` (`hash_b
 - **People, 60 labelled clips (stratified):** `person` precision 0.34 / recall 0.79 on the sample (about 0.40 / 0.82 over the trip),
   `person_sure` (face in 3+ frames) precision 0.63 / recall 0.36. The classic detector is a hint, not a fact (see
   `plugins/vision/README.md`).
+
+## Phase B measurements (same trip)
+- **YuNet vs cascades, 60 labelled clips:** cascades `person` 0.34 precision / 0.79 recall, `person_sure` 0.63 / 0.36. YuNet: a face in
+  any frame 0.83 / 0.71; a face in 2+ frames and larger than 0.5 % of the frame 1.0 / 0.71. Whole-library run: people in 118 of 413
+  clips (the cascades said 226).
+- **Shot size, 174 hand-labelled shots:** old rule 21 % agreement, new rule (texture below 25 means wide, else medium) 63 %; a
+  decision tree of depth 3 reached only 54 % in cross-validation (it overfits 174 noisy labels), so the single threshold was kept.
+  The centre-versus-edge ratio, the old rule's basis, was anti-correlated with `close` on desert footage.
+- **Not predictable from the measurements:** the agent's role (establishing / portrait / action / detail) 52 % and mood 49 % in
+  5-fold cross-validation (baselines 35 % and 48 %). People from the YuNet certainty: 58 % of the noted people found, 10 % of the
+  others flagged.
