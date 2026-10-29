@@ -126,3 +126,12 @@ duplicate. Put the settings you adopt in `chapters.json` under `dedupe` (`hash_b
   Probe and beats are skipped when the footage and the song have not changed; score, vision and the audio scan measure new clips only.
 - **The re-probe guard matters:** the Kavir inventory was made with the Osmo clock 30 minutes back; `prepare` keeps that correction
   (and skips the probe when the inventory already matches the folder: the inventory stayed byte-identical).
+
+## Phase M measurements (same trip)
+- **Beat sync on the rendered sound** (`qa`, `beat-sync`): the earlier Kavir final, cut on the old beat times, measures 0.048 s between
+  its cuts and the music's onsets (the onsets first: the cuts are late) and is now reported; a preview cut on the corrected beats
+  measures 0.033 s the other way (onset detection peaks about a frame after the attack, and cuts sit on whole frames). A synthetic
+  click track: cuts on the clicks pass, the same cuts 0.1 s late are reported although the EDL's grid agrees with them.
+- **`eval_real.py` baseline of the Kavir project** (1.3 s): beat grid against onsets 0.001 s (spread 0.14 s); same moment precision 1.0,
+  recall 0.43; people 0.83 / 0.71; hook candidates all action; selection deterministic; voices 36 % of the people clips against 27 %
+  of the action clips; the corrected preview's beat sync 0.033 s.

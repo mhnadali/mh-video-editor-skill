@@ -5,7 +5,7 @@ behind the MP4 export / size-reduction layer, and hand-off notes for continuing 
 
 ## State
 
-Version **0.27.0**. Standard-library Python over FFmpeg (plus an optional, separately installed vision plug-in), 830+ tests on
+Version **0.28.0**. Standard-library Python over FFmpeg (plus an optional, separately installed vision plug-in), 830+ tests on
 synthetic media, and since 0.17 every selection change is measured against a real trip (486 clips, three cameras, two days;
 numbers in `docs/CALIBRATION.md`).
 
@@ -24,7 +24,9 @@ offline review page, an evaluation harness; then a deep review that fixed twelve
   `calibrate_audio.py` (the thresholds wait for the user's ears).
 - **L, workflow and speed (0.27):** `prepare` (footage to review page, every step cached, 2 s warm on the real project), `clean`,
   frame strips reused (a review rebuild 13.7 s -> 0.3 s).
-- Next: M reliability (0.28); K content understanding, after the owner approves the model download; 1.0 on a second real project.
+- **M, reliability (0.28):** QA measures the beat sync on the rendered sound (it would have caught the 0.23 % error), and
+  `eval_real.py` re-measures a real project against a baseline (beats, same-moment and people labels, hook, sound, determinism).
+- Next: K content understanding, after the owner approves the model download; 1.0 on a second real project.
 
 ## Real-footage arc (0.17 - 0.23, phases A - G)
 - **A, validation (0.17):** the picture hashes were one frame repeated (fixed, scores repaired in place); same-moment strictness
@@ -40,9 +42,16 @@ offline review page, an evaluation harness; then a deep review that fixed twelve
 - **G, engineering (0.23):** the randomized rule check is a tool and a test; these documents brought up to date.
 
 ## Next
-- **Decisions that are the owner's:** branch protection on `main`, whether the repository stays public (every pushed `v*`
-  tag already publishes a GitHub Release through `release.yml`, since 0.15.0), an FFmpeg-version matrix and a macOS runner in CI (both need a trusted FFmpeg
-  source; the Actions policy blocks third-party setup actions).
+- **Decisions that are the owner's** (proposals, nothing done without a yes):
+  - Branch protection on `main`: require a pull request and the seven checks (two no-FFmpeg, two with FFmpeg, coverage, CodeQL x2).
+  - FFmpeg 7.x and macOS in CI: SUPPORT.md promises 6.x, 7.x and 9.x; CI covers 6.x (Ubuntu's package) and the newest (Chocolatey on
+    Windows). Ubuntu 22.04's 4.4 is below the promise, so it does not help. The proposal: a pinned release of BtbN/FFmpeg-Builds (7.1)
+    downloaded in a run step and checked against its SHA-256 (no third-party action), and on macOS Homebrew's `ffmpeg@7` on the arm
+    runner (the Intel runner's Homebrew install failed at setup before).
+  - Housekeeping: pull requests #4 and #5 are open but their content is in `main` (close them); eight remote branches are fully
+    merged (`claude/dev-plan-...`, `feat/capture-time`, `feat/cut-craft-knowledge`, `feat/cut-measurement`, `feat/cut-types-render`,
+    `feat/cutlogic-engine`, `feat/story-selection`, `fix/deep-debug`); Dependabot's #2 bumps the action versions (review and merge).
+  - Whether the repository stays public (every pushed `v*` tag publishes a GitHub Release through `release.yml`).
 - **1.0** when the pipeline has run end to end on a second real project with different footage without a serious problem, and the
   calibration numbers hold there (one trip cannot prove a threshold).
 - Sound: J/L-cuts and the ambient bed are implemented and measured for level, but have not been judged by ear on real footage.

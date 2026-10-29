@@ -283,6 +283,54 @@ def check_cuts(pic: dict, ev: dict, fps: float) -> tuple[list[dict], dict]:
     return out, stats
 
 
+BEAT_SYNC_WARN = 0.045          # seconds (about 1.4 frames at 30 fps) between the cuts and the music's onsets, as a median
+
+
+def beat_sync(video: str | os.PathLike, edl: dict | None, ev: dict) -> dict | None:
+    """Where the music's onsets really are around the cuts that were planned on a beat, measured on the rendered video's own sound.
+
+    The cut-timing check compares the cuts with the EDL's beat times; this one does not trust those times: a beat analysis that is
+    off (0.25 counted 9.977 ms frames as 10 ms, 0.1 s late at 45 s) passes the first and fails this one."""
+    if not edl or not ve.project(edl).get("music") or not ev["cuts"]:
+        return None
+    grid = edl.get("beats") or {}
+    try:
+        t0, period = float(grid["t0"]), float(grid["period"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    if period <= 0:
+        return None
+    planned = [t for _j, t in ev["cuts"] if abs((t - t0) / period - round((t - t0) / period)) * period <= 0.04]
+    import vid_beats
+    try:
+        pcm = vid_beats.decode_pcm(Path(video).resolve())
+    except Exception:                                                                   # noqa: BLE001
+        return None
+    low, high, _full = vid_beats._bands(pcm)                                            # noqa: SLF001
+    onset = vid_beats.onset_strength(low, high)
+    fr, w = vid_beats.FRAME, period / 4.0
+    offs = []
+    for t0 in planned:
+        i0, i1 = max(0, int((t0 - w) / fr)), min(len(onset) - 1, int((t0 + w) / fr))
+        if i1 > i0 + 2:
+            offs.append(max(range(i0, i1 + 1), key=lambda i: onset[i]) * fr - t0)
+    if len(offs) < 4:
+        return None
+    s = sorted(offs)
+    return {"cuts": len(offs), "median": round(s[len(s) // 2], 3), "iqr": round(s[3 * len(s) // 4] - s[len(s) // 4], 3)}
+
+
+def check_beat_sync(sync: dict | None) -> list[dict]:
+    if not sync:
+        return []
+    m = sync["median"]
+    msg = (f"the music's onsets sit {abs(m):.3f} s {'after' if m > 0 else 'before'} the {sync['cuts']} cuts planned on a beat "
+           f"(median, measured on the rendered sound; spread {sync['iqr']:.3f} s)")
+    if sync["cuts"] >= 6 and abs(m) > BEAT_SYNC_WARN:
+        return [{"id": "beat-sync", "level": "warn", "msg": msg + ": the beat times do not match the music (run `beats` again)"}]
+    return [{"id": "beat-sync", "level": "ok", "msg": msg}]
+
+
 def check_exposure_jumps(pic: dict, ev: dict, fps: float) -> list[dict]:
     """How much brightness and colour change across hard cuts. Big jumps are fine in a few places (dark cabin -> bright sky)
     but a video made of them flickers: `color plan --match exposure` evens shots out."""
@@ -517,6 +565,8 @@ def run_qa(video: str | os.PathLike, edl_path: str | os.PathLike | None = None, 
     aud = measure_audio(video)
     target = ve.merged_style(edl)["loudness"] if edl else -14.0
     checks += check_audio(aud, bool(p and p.get("music")), target, info["duration"])
+    sync = beat_sync(video, edl, ev)
+    checks += check_beat_sync(sync)
     audit, audit_data = ({}, {})
     if edl:
         audit_checks, audit_data = audit_edit(edl, scores, notes)
@@ -528,7 +578,7 @@ def run_qa(video: str | os.PathLike, edl_path: str | os.PathLike | None = None, 
     report = {"verdict": verdict, "quality_score": quality_score, "video": vl.ffp(video), "edl": vl.ffp(edl_path) if edl_path else None,
               "duration": info["duration"], "frames": pic["frames"], "size_mb": round(info["size"] / 1e6, 1),
               "counts": counts,
-              "checks": checks, "audio": aud, "cuts": cut_stats, "edit_audit": audit_data}
+              "checks": checks, "audio": aud, "cuts": cut_stats, "beat_sync": sync, "edit_audit": audit_data}
     if sheet:
         report["sheet"] = vid_sheets.video_sheet(video, sheet)
     return report

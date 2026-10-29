@@ -2,6 +2,18 @@
 
 All notable changes to this project. Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [SemVer](https://semver.org/).
 
+## [0.28.0] - 2026-10-29 (phase M: reliability)
+
+### Added
+- **QA `beat-sync`**: the music's onsets around every cut planned on a beat, measured on the rendered video's own sound (a warning
+  over 0.045 s). The cut-timing check compares the cuts with the EDL's beat grid and could not see a wrong grid: the earlier Kavir
+  final (cut on the 0.23 %-late beats) measures 0.048 s and is now reported; a render on the corrected beats measures 0.033 s.
+- `engine/tools/eval_real.py`: re-measures a real project (beats against onsets, the same-moment and people labels, the hook
+  candidates, the sound of noted clips, selection determinism, optionally a render's beat sync) and compares with a saved
+  baseline; a change in the wrong direction beyond its tolerance exits 1. The footage stays out of the repository.
+- The owner's open decisions written out as proposals in docs/ROADMAP.md (branch protection, FFmpeg 7.x and macOS in CI with a
+  pinned and checked download, closing stale pull requests and deleting merged branches).
+
 ## [0.27.0] - 2026-10-29 (phase L: workflow and speed)
 
 ### Added
