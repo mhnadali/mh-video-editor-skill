@@ -5,11 +5,35 @@ behind the MP4 export / size-reduction layer, and hand-off notes for continuing 
 
 ## State
 
-Version **0.8.0**. The original five-phase plan (foundation; speed and accuracy; the automated QA gate; new
-capabilities; hardening, documentation and CI) is complete, the first post-v0.5 arc landed in 0.6.0 (cross-environment
-trust, onboarding, a delivery/export layer, editing-quality tooling, broader hardware support, reproducibility), and a
-professional-editing arc landed in 0.7.0 (tracks A-G below). The engine is standard-library Python over FFmpeg, with
-540+ tests on synthetic media.
+Version **0.23.0**. Standard-library Python over FFmpeg (plus an optional, separately installed vision plug-in), 830+ tests on
+synthetic media, and since 0.17 every selection change is measured against a real trip (486 clips, three cameras, two days;
+numbers in `docs/CALIBRATION.md`).
+
+## Story-first selection arc (0.15 - 0.16.1)
+Chapters and a storyboard the user approves before anything is planned; hard filters (nothing under 5 s), same-moment groups (only
+the best take), the best moment inside a clip, a beam search over the whole sequence with three variants, remembered taste, an
+offline review page, an evaluation harness; then a deep review that fixed twelve bugs.
+
+## Real-footage arc (0.17 - 0.23, phases A - G)
+- **A, validation (0.17):** the picture hashes were one frame repeated (fixed, scores repaired in place); same-moment strictness
+  tuned on labelled pairs; look-alikes flagged, not dropped; the cascade face detector measured at about 40 % precision, so its
+  sightings count only partly; `calibrate_selection.py`.
+- **B, content (0.18):** optional YuNet face detector (precision 0.83-1.0); shot size re-measured (21 % -> 63 % agreement);
+  `drop-weak` audit. Role and mood from measurements failed cross-validation and were not built.
+- **C, review (0.19):** proxy videos, timeline, start-here, auto-save, load and start over.
+- **D, image (0.20):** camera colour matching from simultaneous clips (out of sample -24 %); `plan --stabilize-shaky`; slow-motion
+  frame check.
+- **E, speed (0.21):** faster reusable proxies (-46 % for a real page), time left in long steps, `score --min-duration`.
+- **F, outputs (0.22):** cut-downs from an approved storyboard, taste promoted across projects, music ranked by the story arc.
+- **G, engineering (0.23):** the randomized rule check is a tool and a test; these documents brought up to date.
+
+## Next
+- **Decisions that are the owner's:** branch protection on `main`, the first tagged GitHub Release (the tag-driven workflow
+  exists), whether the repository stays public, an FFmpeg-version matrix and a macOS runner in CI (both need a trusted FFmpeg
+  source; the Actions policy blocks third-party setup actions).
+- **1.0** when the pipeline has run end to end on a second real project with different footage without a serious problem, and the
+  calibration numbers hold there (one trip cannot prove a threshold).
+- Sound: J/L-cuts and the ambient bed are implemented and measured for level, but have not been judged by ear on real footage.
 
 ## Professional-editing arc (0.7.0, tracks A-G)
 
