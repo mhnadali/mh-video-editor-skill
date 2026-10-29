@@ -118,6 +118,13 @@ at that start, and `story refine` never moves a start the user chose or approved
 number; when clips are added and `probe` runs again, `refine`, `review` and `--cut-from` find the storyboard's clips again by
 their paths (alternates are dropped), and `story feedback` refuses decisions that were made on the old numbers.
 
+### The content plug-in (0.29)
+With `setup.py --content` done, the story commands read `content.json`: people from the image model (a "yes" counts like a sure face),
+shot sizes from it, and for clips without a note a guessed role and mood (the nearest of the noted clips; 74 % and 67 % right on Kavir),
+which `story hook` uses with a discount. Two clips whose embeddings are almost the same (cosine 0.94) inside the time window are flagged
+as look-alikes on the storyboard and the review page; nothing is dropped for it (one different pair in twenty came out alike). On Kavir it
+flagged two real repeats the hash rule missed (the same pickup drifting, 25 s apart; the same view from the car window, 17 s apart).
+
 ### Taste across projects
 `story profile --work W --promote` adds the project's topic and role biases (averaged with what the global profile holds) and its
 weights to the global profile (`~/.mh-video-skill/profile.json`, or `MH_PROFILE`); clip decisions (banned, favoured, pinned)

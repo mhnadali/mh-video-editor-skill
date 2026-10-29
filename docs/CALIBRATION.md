@@ -135,3 +135,17 @@ duplicate. Put the settings you adopt in `chapters.json` under `dedupe` (`hash_b
 - **`eval_real.py` baseline of the Kavir project** (1.3 s): beat grid against onsets 0.001 s (spread 0.14 s); same moment precision 1.0,
   recall 0.43; people 0.83 / 0.71; hook candidates all action; selection deterministic; voices 36 % of the people clips against 27 %
   of the action clips; the corrected preview's beat sync 0.033 s.
+
+## Phase K measurements (same trip): the content model
+SigLIP base (quantized ONNX), three frames per clip, 462 clips in 8.5 minutes on this PC (1.1 s a clip, mostly decoding 4K frames).
+- **Same moment, 20 labelled pairs:** cosine of the mean embeddings separates them better than the hashes (same pairs 0.925-0.993,
+  different ones 0.904-0.941), but with a leave-one-out threshold one different pair is called "same": precision 0.92, recall 0.86
+  (hashes 1.0 / 0.43). A dropped good clip costs more than a kept repeat, so it only flags look-alikes (cosine 0.94); on the new
+  storyboard it flagged two real repeats the hashes missed.
+- **Shot size, 174 noted clips:** zero-shot 74 % (the measured rule 63 %, majority 43 %); learning from the notes 68 %.
+- **Role, 174 noted clips:** zero-shot 52 %, nearest centre of the noted clips 74 % (5-fold; measurements 52 %, majority 34 %).
+- **Mood:** nearest centre 67 % (measurements 49 %, majority 48 %). **Action or intense:** AUC 0.87 (quality 0.74, energy 0.48).
+- **People:** zero-shot precision 1.00, recall 0.86 on the 60 hand labels and 1.00 / 0.72 on the 153 noted clips (YuNet 0.83 / 0.71 and
+  0.82 / 0.63). With both in the engine: 0.86 / 0.86 on the hand labels.
+- **Selection:** the same 35 clips in the same slots with and without it on this (well noted) project; shot sizes of the chosen clips
+  read wide 15 / medium 10 / close 10 instead of wide 18 / medium 17; one more shot counted with people. `eval_real.py`: no regression.

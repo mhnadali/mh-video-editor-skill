@@ -22,6 +22,7 @@ import vid_story as st
 MOOD_HOOK = {"intense": 1.0, "building": 0.6, "calm": 0.2}
 ROLE_HOOK = {"action": 0.9, "establishing": 0.45, "portrait": 0.2, "detail": 0.25}
 HOOK_WEIGHTS = {"reading": 0.55, "quality": 0.25, "punch": 0.10, "fresh": 0.10}
+GUESS_DISCOUNT = 0.9           # a role / mood guessed by the content plug-in (74 % / 67 % right on Kavir) counts a little less
 
 
 def _percentiles(values: dict) -> dict:
@@ -93,6 +94,10 @@ def hook_rank(inventory: list, scores: dict, sb: dict, cfg: dict | None = None, 
         if i == first:
             continue
         note = st._note(by_path, by[i])                                                          # noqa: SLF001
+        guessed = False
+        if reading(note) is None and (scores[i].get("role_guess") or scores[i].get("mood_guess")):
+            note = {"role": scores[i].get("role_guess"), "mood": scores[i].get("mood_guess")}      # the content plug-in's guess
+            guessed = True
         if reading(note) is None:
             unread += 1
             continue
@@ -101,6 +106,9 @@ def hook_rank(inventory: list, scores: dict, sb: dict, cfg: dict | None = None, 
                          for j in in_board if j in scores and j in by):
             fresh = 0.5
         s, why = hook_score(note, (scores[i].get("quality") or 0.0) / 100.0, punch.get(i, 0.0), fresh)
+        if guessed:
+            s = round(s * GUESS_DISCOUNT, 3)
+            why[0] = "guessed " + why[0] + " (from the clips you noted)"
         wins = scores[i].get("wins") or []
         start = max(wins, key=lambda w: w[2])[0] if wins else scores[i].get("best_start", 0.0)
         cands.append({"clip": i, "name": by[i].get("name"), "taken": by[i].get("taken"), "score": s, "why": why, "start": start})

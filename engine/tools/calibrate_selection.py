@@ -37,6 +37,8 @@ def load_world(work: str) -> tuple:
     inv = {r["index"]: r for r in vl.load_json(Path(work) / "inventory.json")["clips"]}
     scores = {s["index"]: s for s in vl.load_json(Path(work) / "scores.json")["scores"] if "quality" in s}
     vv.merge_into_scores(scores, vv.load(work))
+    import vid_content
+    vid_content.merge_into_scores(scores, vid_content.load(work, list(inv.values())))   # people from the content plug-in, if run
     return inv, scores
 
 

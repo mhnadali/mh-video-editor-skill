@@ -138,6 +138,9 @@ def same_moment(a: dict, b: dict, sa: dict, sb: dict, cfg: Optional[dict] = None
     return similarity_level(a, b, sa, sb, cfg) == "same"
 
 
+CONTENT_LOOKALIKE = 0.94       # vid_content.LOOKALIKE_COS: cosine of the content embeddings (measured on the Kavir pairs)
+
+
 def similarity_level(a: dict, b: dict, sa: dict, sb: dict, cfg: Optional[dict] = None) -> Optional[str]:
     """'same' (the strict reading: one of the two is dropped), 'lookalike' (the looser reading: flagged only) or None."""
     d = merged(DEFAULT_DEDUPE, cfg)
@@ -155,6 +158,9 @@ def similarity_level(a: dict, b: dict, sa: dict, sb: dict, cfg: Optional[dict] =
         return "same"
     if sum(1 for x in hd if x <= d["lookalike_hash_bits"]) >= need and sim["colour"] <= d["lookalike_colour"] \
             and sim["brightness"] <= d["lookalike_brightness"]:
+        return "lookalike"
+    va, vb = sa.get("content_vec"), sb.get("content_vec")
+    if va and vb and sum(x * y for x, y in zip(va, vb)) >= CONTENT_LOOKALIKE:       # the content plug-in: a flag, never a drop
         return "lookalike"
     return None
 
