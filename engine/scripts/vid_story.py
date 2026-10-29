@@ -257,15 +257,23 @@ def _note(notes: dict, rec: dict) -> dict:
     return notes.get(os.path.normcase(os.path.abspath(rec["path"]))) or {}
 
 
-def _people(note: dict, score: dict) -> bool:
-    """Is a person in the clip? The agent's note decides when it says so (`people` true or false, or role portrait); else the
-    local vision plug-in's judgement (faces or bodies seen); else no."""
+def _people_certainty(note: dict, score: dict) -> float:
+    """How sure we are that a person is in the clip: 1.0 when the agent's note says so (`people` true, or role portrait), 0.6 for
+    a face in several frames of the local vision plug-in, 0.25 for a weaker sighting; 0 for no person. The classic face detector
+    is right about half the time on desert footage (see plugins/vision/README.md), so it only counts for part of a person."""
     if "people" in note:
-        return bool(note["people"]) or note.get("role") == "portrait"
+        return 1.0 if (note["people"] or note.get("role") == "portrait") else 0.0
     if note.get("role") == "portrait":
-        return True
-    seen = score.get("person")
-    return bool(seen) if seen is not None else False
+        return 1.0
+    if score.get("person_sure"):
+        return 0.6
+    if score.get("person"):
+        return 0.25
+    return 0.0
+
+
+def _people(note: dict, score: dict) -> bool:
+    return _people_certainty(note, score) > 0.0
 
 
 def clip_view(rec: dict, score: dict, note: dict) -> dict:
@@ -283,7 +291,7 @@ def clip_view(rec: dict, score: dict, note: dict) -> dict:
             "sound": None if score.get("sound") is None else score["sound"] / 100.0,
             "transient": None if score.get("transient") is None else score["transient"] / 100.0,
             "hash": score.get("hash"), "size": size, "role": role, "topic": note.get("topic"),
-            "people": _people(note, score),
+            "people": _people(note, score), "people_certainty": _people_certainty(note, score),
             "best_start": score.get("best_start", 0.0), "action_start": action_start,
             "brightness": score.get("brightness"), "csig": score.get("csig") or [], "scene": score.get("scene"),
             "motion_dx": score.get("motion_dx"), "motion_mag": score.get("motion_mag"),
@@ -340,7 +348,7 @@ def _components(c: dict, target: float, chosen: list, ctx: dict) -> dict:
     w = ctx.get("w") or WEIGHTS
     bonus, why = 0.0, []
     if c["people"] and ctx["people_share"] < ctx["min_people_share"]:
-        bonus += w["people"]
+        bonus += w["people"] * c.get("people_certainty", 1.0)
         why.append("brings people into the story")
     if len(ctx["device_library_share"]) > 1 and ctx["picked_so_far"] >= 4 and             ctx["device_share"].get(c["device"], 0.0) < ctx["device_library_share"].get(c["device"], 0.0) * 0.8:
         bonus += w["camera"]
@@ -588,12 +596,19 @@ def select(inventory: list, scores: dict, beats: dict, cfg: dict, notes: Optiona
         start = v["action_start"] if action else v["best_start"]
         rows.append({"slot": k, "t": s["t"], "len": s["len"], "music": s["music"], "chapter": cname, "clip": v["index"],
                      "name": v["name"], "taken": v["taken"], "device": v["device"], "role": v["role"], "size": v["size"],
-                     "people": v["people"], "topic": v["topic"], "energy": round(v["act"], 2), "target": round(target, 2),
+                     "people": v["people"], "people_certainty": v.get("people_certainty", 1.0 if v["people"] else 0.0),
+                     "topic": v["topic"], "energy": round(v["act"], 2), "target": round(target, 2),
                      "start": round(start, 2), "start_kind": "action moment" if action else "best frame window",
                      "score": round(total(parts, w), 3), "path": v["path"],
                      "why": explain(v, parts, target, s), "alternates": [a for a in alt if a != v["index"]][:2]})
     if len(rows) < len(slots):
         warnings.append(f"only {len(rows)} of {len(slots)} slots could be filled")
+    slot_of = {r["clip"]: r["slot"] for r in rows}
+    alike = vf.lookalikes([r["clip"] for r in rows], inventory, scores, cfg.get("dedupe"))
+    for i, j in alike:
+        warnings.append(f"slots {slot_of[i]} and {slot_of[j]} (clips {i} and {j}) look alike: replace one if they show the same thing")
+    for r in rows:
+        r["lookalike"] = sorted(slot_of[j if i == r["clip"] else i] for i, j in alike if r["clip"] in (i, j))
     return {"duration": duration, "slots": len(slots), "body_start": body_start, "pacing": pacing,
             "variant": variant, "method": method,
             "sequence_score": None if sequence_value is None else round(sequence_value, 3),
@@ -695,13 +710,13 @@ def beam_entries(plan: list, w: dict, cfg: dict, ctx: dict, prior: list, role_pr
                         val -= w["topic"]
                 done = len(st["picks"]) + 1
                 if c["people"] and min_people and st["people"] / max(done, 1) < min_people:
-                    val += w["people"]
+                    val += w["people"] * c.get("people_certainty", 1.0)
                 lib = lib_share.get(c["device"], 0.0)
                 if len(lib_share) > 1 and done >= 4 and st["dev"].get(c["device"], 0) / done < 0.8 * lib:
                     val += w["camera"]
                 key = (c["index"], prev["index"] if prev else None)
                 ns = {"picks": st["picks"] + [c], "value": st["value"] + val,
-                      "people": st["people"] + (1 if c["people"] else 0),
+                      "people": st["people"] + c.get("people_certainty", 1.0 if c["people"] else 0.0),
                       "dev": dict(st["dev"], **{c["device"]: st["dev"].get(c["device"], 0) + 1}),
                       "topics": dict(st["topics"]), "used": st["used"] | {c["index"]}}
                 if c["topic"]:
@@ -831,6 +846,7 @@ def coverage(rows: list, inventory: list) -> dict:
     return {"devices_in_edit": {d: round(c / n, 2) for d, c in dev.items()},
             "devices_in_library": {d: round(c / lt, 2) for d, c in lib.items()},
             "people_share": round(sum(1 for r in rows if r["people"]) / n, 2),
+            "people_confirmed_share": round(sum(1 for r in rows if r.get("people_certainty", 1.0 if r["people"] else 0.0) >= 1.0) / n, 2),
             "roles": {k: sum(1 for r in rows if r["role"] == k) for k in sorted({r["role"] for r in rows if r["role"]})}}
 
 
@@ -859,7 +875,8 @@ def storyboard_markdown(sb: dict) -> str:
                    f"{', '.join(str(a) for a in r['alternates'])} |")
     cv = sb["coverage"]
     out += ["", "## Coverage", f"- cameras in the edit: {cv['devices_in_edit']} (library: {cv['devices_in_library']})",
-            f"- shots with people: {cv['people_share']:.0%}", f"- roles: {cv['roles']}"]
+            f"- shots with people: {cv['people_share']:.0%} ({cv.get('people_confirmed_share', 0):.0%} confirmed by your notes; the rest "
+            "only by the face detector, which is right about half the time)", f"- roles: {cv['roles']}"]
     ex = sb.get("exclusions")
     if ex:
         out += ["", "## Left out before choosing",

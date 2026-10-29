@@ -23,7 +23,7 @@ import vidlib as vl
 WINDOW = 1.0
 POSITIONS = (0.25, 0.5, 0.75)
 ANALYSIS_WIDTH = 480
-SCHEMA = 3                  # bump when a new measurement is added: older cached entries are measured again
+SCHEMA = 4                  # bump when a measurement is added or fixed; `top_up` repairs older cached entries without a full decode
 DECODE_THREADS = 2          # many small decodes in parallel beat a few wide ones (measured: 15 % faster than the default)
 
 # One decode per window gives everything: exposure, motion and sharpness (metadata files) plus the tiny frames the
@@ -34,11 +34,20 @@ _GRAPH = ("fps=10,scale={w}:-2,{tm}format=yuv420p,split=7[a][b][c][g][r][h][j];"
           "[c]format=gray,blurdetect,metadata=print:file=blur.txt[o];"
           "[g]scale=48:27:flags=area,format=gray,fps=6[og];"
           "[r]scale=16:9:flags=area,format=rgb24,fps=3[or];"
-          "[h]scale=9:8:flags=area,format=gray,select='eq(n,2)+eq(n,5)+eq(n,8)'[oh];"
+          "[h]scale=9:8:flags=area,format=gray[oh];"
           "[j]scale=48:27:flags=area,format=gray[oj]")
-# label, name, frames, bytes per frame. `hash` holds the frames 2, 5 and 8 of the window (the middle one is the picture hash);
-# `jit` is every frame of the window (10 at 10 fps) for the shake measurement
-_RAW = (("og", "gray", 6, 48 * 27), ("or", "rgb", 3, 16 * 9 * 3), ("oh", "hash", 3, 72), ("oj", "jit", 10, 48 * 27))
+# label, name, frames, bytes per frame. `hash` holds every frame of the window at 9x8 (10 at 10 fps); `hash_frames` picks three
+# of them for the picture hashes. (A `select` filter here once made FFmpeg repeat ONE frame to fill the gaps in time, so the
+# three hashes were identical: take all frames and choose in Python.) `jit` is every frame of the window for the shake measurement
+_RAW = (("og", "gray", 6, 48 * 27), ("or", "rgb", 3, 16 * 9 * 3), ("oh", "hash", 10, 72), ("oj", "jit", 10, 48 * 27))
+
+
+def hash_frames(frames: list) -> list:
+    """Three frames spread over a window (the 3rd, 6th and 9th of ten): the picture hashes of a clip."""
+    n = len(frames)
+    if n == 0:
+        return []
+    return [frames[min(n - 1, int(n * f))] for f in (0.25, 0.5, 0.85)]
 
 
 def _read_raw(path: Path, size: int) -> list[bytes]:
@@ -155,6 +164,43 @@ def hamming(a: int, b: int) -> int:
     return bin(a ^ b).count("1")
 
 
+def window_hashes(path: str, start: float, hdr: bool = False) -> list | None:
+    """The three picture hashes of one window, decoded on their own (the same chain as the full measurement)."""
+    vf = "fps=10," + f"scale={ANALYSIS_WIDTH}:-2," + (vid_sheets.TONEMAP_HLG if hdr else "") + \
+        "format=yuv420p,scale=9:8:flags=area,format=gray"
+    r = subprocess.run([vl.find_ffmpeg()["ffmpeg"], "-v", "error", "-threads", str(DECODE_THREADS), "-ss", f"{max(0.0, start):.2f}",
+                        "-t", str(WINDOW), "-i", vl.ffp(path), "-an", "-vf", vf, "-frames:v", "10", "-f", "rawvideo", "-"],
+                       capture_output=True)
+    if r.returncode != 0:
+        return None
+    frames = [r.stdout[i * 72:(i + 1) * 72] for i in range(len(r.stdout) // 72)]
+    hs = [hash_from_pixels(px) for px in hash_frames(frames)]
+    return hs if hs and all(h is not None for h in hs) else None
+
+
+def top_up(old: dict, rec: dict) -> dict | None:
+    """Bring a cached entry of an older schema up to date with a small decode instead of measuring the clip again:
+    the three picture hashes (before schema 4 they were one frame repeated) and the clip's sound spikes. Returns the new
+    entry, or None if the entry is too old for that (the clip is measured again)."""
+    if "quality" not in old or "wins" not in old or "flux" not in old:
+        return None
+    out = dict(old)
+    hs = window_hashes(rec["path"], old.get("best_start", 0.0), bool(rec.get("hdr")))
+    if hs is None:
+        return None
+    out["hashes"], out["hash"] = hs, hs[len(hs) // 2]
+    if rec.get("has_audio") and "audio_peak_db" not in out:
+        try:
+            import vid_sfx
+            db, peak = vid_sfx.volume_stats(rec["path"], old.get("best_start", 0.0), WINDOW)
+            out["audio_db"] = None if db is None else round(db, 1)
+            out["audio_peak_db"] = None if peak is None else round(peak, 1)
+        except (vl.EngineError, OSError):
+            pass
+    out["v"] = SCHEMA
+    return out
+
+
 def score_clip(rec: dict, hw: bool = False) -> dict:
     """Score one inventory record. Returns the new fields for that clip."""
     if rec.get("error") or not rec.get("duration"):
@@ -179,7 +225,7 @@ def score_clip(rec: dict, hw: bool = False) -> dict:
            "saturation": round(best["saturation"], 1), "blur": round(best["blur"], 2),
            "motion": round(best["motion"], 2), "flags": flags(best), "windows": len(wins)}
     tiny = best.get("tiny") or {}
-    hs = [hash_from_pixels(px) for px in (tiny.get("hash") or [])]
+    hs = [hash_from_pixels(px) for px in hash_frames(tiny.get("hash") or [])]
     h = hs[len(hs) // 2] if hs else None
     if hs and all(x is not None for x in hs):
         out["hashes"] = hs                                  # three frames of the window: a duplicate has all of them close
@@ -251,12 +297,13 @@ def score_inventory(records: list[dict], workers: int | None = None, limit: int 
     def one(r):
         nonlocal done, reused
         old = previous.get(r["path"])
-        current = old is not None and (old.get("v") == SCHEMA or ("flux" in old and "wins" in old and "hashes" in old))
-        if old and old.get("size") == r.get("size") and old.get("mtime") == r.get("mtime") and "quality" in old and current:
-            out = dict(old)
-            out["index"] = r["index"]
-            reused += 1
-        else:
+        out = None
+        if old and old.get("size") == r.get("size") and old.get("mtime") == r.get("mtime") and "quality" in old:
+            out = dict(old) if old.get("v") == SCHEMA else top_up(old, r)
+            if out is not None:
+                out["index"] = r["index"]
+                reused += 1
+        if out is None:
             out = score_clip(r, hw)
         done += 1
         if progress and done % 25 == 0:

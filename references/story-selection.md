@@ -74,6 +74,8 @@ choice. `story refine` moves each start time to the best moment inside the clip 
 end of the clip). With the optional offline plug-in (`python plugins/vision/setup.py`, then `vision run --work W`) people and faces
 are found automatically; your `people` notes always win.
 
+Two chosen shots that only look alike (a looser reading than the one that drops a clip) are flagged in the storyboard's warnings and on the review page, never dropped. People found only by the face detector count as part of a person (0.25, or 0.6 for a face in three frames) because it is right about half the time; your `people` notes count fully.
+
 ### Reviewing and teaching
 `story review --work W --storyboard storyboard.json` writes one offline HTML page: a strip of three frames per chosen clip and per
 alternate, the reason for the choice, and the music's energy against the shots'. The user presses *Keep*, *Use this one* or *Ban*
