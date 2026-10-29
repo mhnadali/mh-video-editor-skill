@@ -2,6 +2,25 @@
 
 All notable changes to this project. Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [SemVer](https://semver.org/).
 
+## [0.26.0] - 2026-10-29 (phase J: the sound)
+
+### Fixed
+- **Beat times ran 0.23 % late** since the beginning: an analysis frame of 110 samples at 11025 Hz is 9.977 ms, not 10 ms. A 150 s
+  click track came out 0.097 s late at 45 s and 0.205 s at 90 s; now within 0.01 s. beats.json carries `timebase: 2`, and the
+  commands that read an older one warn to run `beats` again. On the Kavir song the cuts at 45 s were three frames late.
+
+### Added
+- `vid_audio`: what a clip's sound is, measured in one FFmpeg pass (level, share under 150 Hz, periodicity of that low band,
+  syllable rhythm and depth of the speech band, clipping): voices, wind, rumble (engines), quiet or other.
+- Ambient sound leaves out windy and clipped windows (`style.ambient.skip`, default wind and clipped; `"audio": {"use": true}` keeps
+  a shot; `style.ambient.thresholds` takes calibrated values); the render log names the shots left out.
+- `music fit`: end on the song's own ending. Joins on downbeats, ranked by the loudness and band-balance step, with the beat
+  alignment after the join measured and kept (ending speed within 3 %, resume shift within 0.1 s), `--preview` audio per join,
+  `--choose N --write` stores `project.music_edit`, which the renderer and lint understand.
+- `audio scan` (the sound of every clip into audio.json, cached), `audio review` (a listening page of 30 excerpts spread over the
+  measured labels, exports audio_labels.json) and `engine/tools/calibrate_audio.py` (agreement, wind precision and recall, a
+  threshold sweep).
+
 ## [0.25.0] - 2026-10-29 (phase I: the opening, the ending, the whole flow)
 
 ### Added

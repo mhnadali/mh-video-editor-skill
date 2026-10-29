@@ -26,6 +26,8 @@ Exit codes: 0 = success; 1 = a check failed (QA FAIL, lint errors, verify failed
 | [`color`](#color) | colour correction and grading tools |
 | [`text`](#text) | on-screen text (Persian right-to-left supported) |
 | [`sfx`](#sfx) | sound design and ambient bed |
+| [`audio`](#audio) | the footage's own sound: measure it, and a page to check it by ear |
+| [`music`](#music) | fit the music to the edit: end on the song's own ending |
 
 ## `doctor`
 
@@ -661,3 +663,64 @@ mh_video sfx plan [-h] edl
 | Argument | Required / default | Meaning |
 |---|---|---|
 | `edl` | required | the *.edl.json file |
+
+## `audio`
+
+The footage's own sound: measure it, and a page to check it by ear.
+
+```
+mh_video audio [-h] {scan,review} ...
+```
+
+### `audio scan`
+
+Measure the sound of every clip (voices, wind, rumble, quiet, clipped) into <work>/audio.json.
+
+```
+mh_video audio scan [-h] --work WORK [--workers WORKERS]
+```
+
+| Argument | Required / default | Meaning |
+|---|---|---|
+| `--work WORK` | required | work folder (inventory, scores, sheets, beats live here) |
+| `--workers WORKERS` | default `6` | parallel workers (default: min(4, CPUs)) |
+
+### `audio review`
+
+An offline page of short sound excerpts to label by ear (for calibrate_audio.py).
+
+```
+mh_video audio review [-h] --work WORK [--out OUT] [--count COUNT]
+```
+
+| Argument | Required / default | Meaning |
+|---|---|---|
+| `--work WORK` | required | work folder (inventory, scores, sheets, beats live here) |
+| `--out OUT` |  | the page (default <work>/listen.html) |
+| `--count COUNT` | default `30` | how many excerpts (default 30, spread over the measured labels) |
+
+## `music`
+
+Fit the music to the edit: end on the song's own ending.
+
+```
+mh_video music [-h] {fit} ...
+```
+
+### `music fit`
+
+Cut the music on a downbeat and go on at a later one so the song's own ending closes the video.
+
+```
+mh_video music fit [-h] --beats BEATS [--duration DURATION] [--edl EDL] [--choose CHOOSE] [--preview PREVIEW] [--write] [--top TOP]
+```
+
+| Argument | Required / default | Meaning |
+|---|---|---|
+| `--beats BEATS` | required | beats.json from the `beats` command |
+| `--duration DURATION` |  | video length in seconds (default: the EDL's) |
+| `--edl EDL` |  | the EDL to write project.music_edit into (with --write) |
+| `--choose CHOOSE` | default `1` | which row of the table to use (default 1, the smoothest join) |
+| `--preview PREVIEW` |  | folder: write a short audio file per candidate join to listen to |
+| `--write` |  | store the chosen join in the EDL (otherwise only print the table) |
+| `--top TOP` | default `6` | how many candidates to show (default 6) |

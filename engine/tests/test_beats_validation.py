@@ -34,7 +34,7 @@ class Pure(unittest.TestCase):
         on[200] = 0.1                      # below 30% of max
         on[300] = 0.8
         t = vb.peak_times(on)
-        self.assertEqual(t, [1.0, 3.0])
+        self.assertEqual(t, [100 * vb.FRAME, 300 * vb.FRAME])         # frames of 110 samples at 11025 Hz, not 10 ms
 
     def test_bar_phase_picks_the_heavy_beat(self):
         # low-band envelope with a big kick every 4th beat starting at beat index 2

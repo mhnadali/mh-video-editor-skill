@@ -36,6 +36,21 @@ Wind, engines and voices under the music. The level is **relative to the music**
 - Clips without an audio track and silent recordings are skipped.
 - `shots: [0, 3, 7]` restricts it to those shots.
 - Ambient sound is part of the mix that gets mastered, so the loudness target still holds.
+- **Wind and clipping are left out** (0.26): every shot's window is measured (`vid_audio`: the share under 150 Hz, whether that low
+  sound repeats like an engine or not, the syllable rhythm of the speech band, clipping). A window that reads as wind (low and not
+  periodic) or clipped is skipped and the render log says which shots; `"audio": {"use": true}` on a shot keeps it, `"skip": []`
+  keeps everything, `"skip": ["wind", "clipped", "rumble"]` also drops engines. The readings are provisional until checked by ear:
+  `audio scan --work W` measures every clip, `audio review --work W` makes a listening page of 30 excerpts, and
+  `engine/tools/calibrate_audio.py --work W --labels audio_labels.json` compares; put better values in `"thresholds"`.
+
+## The song's own ending (0.26)
+`music fit --beats beats.json --edl video.edl.json` lists the ways to end on the song's real ending instead of a fade: cut the
+music at a downbeat and go on at a later one, so the final hit lands 0.4-3 s before the end of the video. Each row shows the
+loudness and band-balance step at the join and where the beats sit against the planned cuts after the join next to where the
+original music had them (they must match: the speed of the ending and a shift of at most 0.1 s are chosen for that). `--preview
+DIR` writes a short audio file per join; listen, then `--choose N --write` stores `project.music_edit` and the next render joins
+the song with 15 ms fades on the downbeat. The music after the join is a different part of the song: tell the user, and look
+at the end of the storyboard again.
 
 ## Mastering (always)
 Music + riser + boom + whooshes + ambient are mixed, then loudness is set on the FINAL mix in two passes (measure, then a linear gain), target `style.loudness` (default -14 LUFS), true peak held at -2 dBTP, sample peak limited to -1.5 dBFS. The QA gate measures loudness, true peak and silences.

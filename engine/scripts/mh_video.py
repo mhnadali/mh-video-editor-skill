@@ -209,7 +209,7 @@ def cmd_pick(a) -> int:
         raise vl.EngineError("count is too small for intro + body + outro")
     frac = a.payoff_share
     if a.beats:
-        b = vl.load_json(a.beats)
+        b = vl.load_json(a.beats); _warn_stale(b)
         if b.get("drop") and b.get("duration"):
             frac = max(0.2, min(0.8, 1.0 - b["drop"] / b["duration"]))
     payoff = max(1, round(body * frac))
@@ -226,7 +226,7 @@ def cmd_pick(a) -> int:
 
 def cmd_need(a) -> int:
     import vid_plan
-    beats = vl.load_json(a.beats)
+    beats = vl.load_json(a.beats); _warn_stale(beats)
     body_t0 = vid_plan.body_start_time(beats, a.duration or beats["duration"], a.period or beats["period"], a.intro_shots,
                                        body_start=a.body_start)
     if a.follow_tempo:
@@ -242,7 +242,7 @@ def cmd_need(a) -> int:
 
 def cmd_plan(a) -> int:
     import vid_plan
-    beats = vl.load_json(a.beats)
+    beats = vl.load_json(a.beats); _warn_stale(beats)
     clips = vid_plan.parse_clip_list(a.clips)
     if a.scores:
         import vid_score
@@ -291,6 +291,63 @@ def cmd_render(a) -> int:
         print(json.dumps(vid_render.render_formats(a.edl, None, **kw), indent=2))
     else:
         print(json.dumps(vid_render.render(a.edl, a.out, fmt=a.format, **kw), indent=2))
+    return 0
+
+
+def cmd_audio(a) -> int:
+    import vid_listen
+    import vid_probe
+    import vid_score
+    inv = vid_probe.load_inventory(a.work)
+    scores = vid_score.load_scores(a.work)
+    sounds = vid_listen.scan(a.work, inv, scores, workers=getattr(a, "workers", 6) or 6)
+    if a.action == "scan":
+        print("sound of the clips (provisional labels, see `audio review`): " +
+              ", ".join(f"{k} {v}" for k, v in sorted(vid_listen.summary(sounds).items())))
+        print(f"wrote {Path(a.work) / 'audio.json'}")
+        return 0
+    out = Path(a.out or Path(a.work) / "listen.html")
+    vid_listen.review_page(out, sounds, inv, count=a.count)
+    print(f"wrote {out} and its excerpts in {out.stem}_media/: open it, label what you hear, Export, then "
+          f"`python engine/tools/calibrate_audio.py --work {a.work} --labels audio_labels.json`")
+    return 0
+
+
+def _warn_stale(beats) -> None:
+    import vid_beats
+    msg = vid_beats.stale(beats)
+    if msg:
+        print(msg, file=sys.stderr)
+
+
+def cmd_music(a) -> int:
+    import vid_edl
+    import vid_musicfit
+    beats = vl.load_json(a.beats); _warn_stale(beats)
+    edl = vid_edl.load(a.edl) if a.edl else None
+    seconds = a.duration or (vid_edl.project(edl)["duration"] if edl else None)
+    if not seconds:
+        raise vl.EngineError("give --duration or --edl")
+    cands = vid_musicfit.candidates(beats, seconds)[: max(1, a.top)]
+    if not cands:
+        print(vid_musicfit.describe(None, seconds))
+        return 0
+    print(vid_musicfit.format_table(cands))
+    if not 1 <= a.choose <= len(cands):
+        raise vl.EngineError(f"--choose must be 1-{len(cands)}")
+    pick = cands[a.choose - 1]
+    print(vid_musicfit.describe(pick, seconds))
+    if a.preview:
+        for k, c in enumerate(cands, 1):
+            path = vid_musicfit.preview(beats["file"], c, seconds, Path(a.preview) / f"join_{k}.m4a")
+            print(f"  {k}: {path}")
+        print("listen to each join (it starts a few seconds before the cut) and choose with --choose N")
+    if a.write:
+        if not edl:
+            raise vl.EngineError("--write needs --edl")
+        edl.setdefault("project", {})["music_edit"] = {"cut": pick["cut"], "resume": pick["resume"], "tempo": pick.get("tempo", 1.0)}
+        vl.save_json(a.edl, edl)
+        print(f"wrote project.music_edit into {a.edl}; the next render uses the song's own ending")
     return 0
 
 
@@ -346,6 +403,7 @@ def cmd_story(a) -> int:
               "(what the story needs, not what was filmed), the energy (calm / building / peak) and merge or split blocks.")
         return 0
     beats = vl.load_json(a.beats) if getattr(a, "beats", None) else None
+    _warn_stale(beats)
     notes = vl.load_json(a.notes) if getattr(a, "notes", None) else None
     if a.action == "refine":
         import vid_moment
@@ -516,6 +574,7 @@ def cmd_cuts(a) -> int:
     import vid_score
     edl = vid_edl.load(a.edl)
     beats = vl.load_json(a.beats) if a.beats else None
+    _warn_stale(beats)
     notes = vl.load_json(a.notes) if a.notes else None
     scores = vid_score.load_scores(a.scores)
     decisions = vid_cutlogic.analyse(edl, scores, beats, notes, keep_existing=not a.overwrite)
@@ -778,6 +837,24 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--beats-per-bar", type=int, default=4, help="beats per bar for the downbeat grid (4 = common time, 3 = waltz)")
     p.add_argument("--first-beat", type=float, help="time in seconds of the first beat (overrides the detected phase)")
     p.set_defaults(fn=cmd_beats)
+    p = sub.add_parser("audio", help="the footage's own sound: measure it, and a page to check it by ear")
+    asub = p.add_subparsers(dest="action", required=True)
+    q = asub.add_parser("scan", help="measure the sound of every clip (voices, wind, rumble, quiet, clipped) into <work>/audio.json")
+    q.add_argument("--work", required=True); q.add_argument("--workers", type=int, default=6)
+    q = asub.add_parser("review", help="an offline page of short sound excerpts to label by ear (for calibrate_audio.py)")
+    q.add_argument("--work", required=True); q.add_argument("--out", help="the page (default <work>/listen.html)")
+    q.add_argument("--count", type=int, default=30, help="how many excerpts (default 30, spread over the measured labels)")
+    p.set_defaults(fn=cmd_audio)
+    p = sub.add_parser("music", help="fit the music to the edit: end on the song's own ending")
+    msub = p.add_subparsers(dest="action", required=True)
+    q = msub.add_parser("fit", help="cut the music on a downbeat and go on at a later one so the song's own ending closes the video")
+    q.add_argument("--beats", required=True); q.add_argument("--duration", type=float, help="video length in seconds (default: the EDL's)")
+    q.add_argument("--edl", help="the EDL to write project.music_edit into (with --write)")
+    q.add_argument("--choose", type=int, default=1, help="which row of the table to use (default 1, the smoothest join)")
+    q.add_argument("--preview", help="folder: write a short audio file per candidate join to listen to")
+    q.add_argument("--write", action="store_true", help="store the chosen join in the EDL (otherwise only print the table)")
+    q.add_argument("--top", type=int, default=6, help="how many candidates to show (default 6)")
+    p.set_defaults(fn=cmd_music)
     p = sub.add_parser("score", help="measure sharpness, exposure and motion of every clip; best window; same-scene hashes")
     p.add_argument("--work", required=True); p.add_argument("--workers", type=int); p.add_argument("--limit", type=int)
     p.add_argument("--rescore", action="store_true", help="ignore earlier scores (default: reuse unchanged files)")

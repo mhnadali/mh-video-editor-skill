@@ -32,7 +32,8 @@ _SWISH = {"pixelize", "hblur", "distance", "squeezeh", "diagtl", "diagtr", "diag
 SILENT = {"fade", "dissolve", "fadegrays", "fadewhite", "fadefast", "fadeslow"}
 
 DEFAULT_SOUND_DESIGN = {"whoosh": True, "level_db": -24.0, "max_events": 12, "duck": True}
-DEFAULT_AMBIENT = {"level_db": -14.0, "fade_ms": 40, "shots": "all", "highpass_hz": 90}
+DEFAULT_AMBIENT = {"level_db": -14.0, "fade_ms": 40, "shots": "all", "highpass_hz": 90, "skip": ["wind", "clipped"]}
+SKIPPABLE = ("wind", "clipped", "rumble", "voices", "other")
 
 
 def whoosh_kind(transition: str) -> str | None:
@@ -101,6 +102,12 @@ def validate(edl: dict) -> list[dict]:
                 add("error", "ambient", "ambient.shots must be \"all\" or a list of shot numbers")
             if not 0 <= cfg["fade_ms"] <= 500:
                 add("error", "ambient", "ambient.fade_ms must be 0-500")
+            th = cfg.get("thresholds") or {}
+            import vid_audio
+            if not (isinstance(th, dict) and all(k in vid_audio.THRESHOLDS and isinstance(v, (int, float)) for k, v in th.items())):
+                add("error", "ambient", f"ambient.thresholds may set only {', '.join(vid_audio.THRESHOLDS)} (numbers; from calibrate_audio.py)")
+            if not (isinstance(cfg["skip"], list) and all(s in SKIPPABLE for s in cfg["skip"])):
+                add("error", "ambient", f"ambient.skip must be a list of {', '.join(SKIPPABLE)} (default wind and clipped; [] keeps all)")
     for j, shot in enumerate(edl.get("shots") or []):
         a = shot.get("audio")
         if a is not None and not isinstance(a, dict):
@@ -193,10 +200,21 @@ def mean_volume(path: str, start: float, seconds: float) -> float | None:
     return float(m.group(1)) if m else None
 
 
-def ambient_segments(edl: dict, windows: list[dict], music_mean_db: float | None) -> list[dict]:
+def sound_of(clip: str, start: float, seconds: float) -> dict | None:
+    """What the window's sound is (vid_audio), or None when it cannot be measured (then nothing is skipped for it)."""
+    try:
+        import vid_audio
+        return vid_audio.measure(clip, start, seconds)
+    except Exception:                                           # noqa: BLE001 - a measurement never stops a render
+        return None
+
+
+def ambient_segments(edl: dict, windows: list[dict], music_mean_db: float | None, skipped: list | None = None) -> list[dict]:
     """Which shots contribute natural sound, with the gain (dB) that puts each at music + level_db.
 
-    `windows`: [{'j', 'clip', 'start0', 'seconds', 'out_start', 'out_seconds', 'speed', 'has_audio'}] per shot.
+    `windows`: [{'j', 'clip', 'start0', 'seconds', 'out_start', 'out_seconds', 'speed', 'has_audio'}] per shot. A window whose
+    sound is measured as one of `ambient.skip` (default wind and clipping) is left out, unless the shot says `"audio": {"use": true}`;
+    `skipped` (if given) receives {'j', 'why'} for each.
     """
     cfg = ambient_config(edl)
     if not cfg:
@@ -218,15 +236,27 @@ def ambient_segments(edl: dict, windows: list[dict], music_mean_db: float | None
             continue                                              # retimed picture: sound would be wrong
         todo.append((w, opts))
 
+    skip = set(cfg.get("skip") or [])
+
     def measure(item):
         w, opts = item
-        return mean_volume(w["clip"], w["start0"], w["seconds"])
+        snd = sound_of(w["clip"], w["start0"], w["seconds"]) if skip and opts.get("use") is not True else None
+        return mean_volume(w["clip"], w["start0"], w["seconds"]), snd
 
     with ThreadPoolExecutor(vl.cpu_workers(4)) as ex:
         means = list(ex.map(measure, todo))
-    for (w, opts), mv in zip(todo, means):
+    import vid_audio
+    for (w, opts), (mv, snd) in zip(todo, means):
         if mv is None or mv < -75:
             continue                                              # silent recording
+        if snd is not None:
+            th = dict(vid_audio.THRESHOLDS, **(cfg.get("thresholds") or {}))
+            lab = vid_audio.label(snd, th)
+            why = "clipped" if ("clipped" in skip and snd.get("clipped", 0.0) > th["clipped"]) else (lab if lab in skip else None)
+            if why:
+                if skipped is not None:
+                    skipped.append({"j": w["j"], "why": why})
+                continue
         gain = max(-12.0, min(18.0, ref - mv)) + float(opts.get("gain_db", 0.0))
         tempo = None
         if w["speed"] and opts.get("speed_follow"):

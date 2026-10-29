@@ -1,6 +1,6 @@
 # M.H. Video Editor Skill
 
-![Version](https://img.shields.io/badge/version-0.25.0-blue)
+![Version](https://img.shields.io/badge/version-0.26.0-blue)
 ![Claude Code](https://img.shields.io/badge/Claude%20Code-skill%20%2B%20agent-orange)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
