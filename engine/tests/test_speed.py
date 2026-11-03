@@ -173,5 +173,28 @@ class ProbeCache(unittest.TestCase):
         self.assertEqual(counts, [60, 60])
 
 
+@NEEDS_FF
+@helpers.slow
+class BenchThroughput(unittest.TestCase):
+    """The throughput benchmark tool: it runs, reports clips/second, and proves the warm re-score reuses the cache."""
+
+    @classmethod
+    def setUpClass(cls):
+        import sys
+        sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "tools"))
+
+    def test_bench_runs_and_rescore_reuses_everything(self):
+        import bench_throughput as bt
+        work = helpers.tmpdir() / "bench"
+        res = bt.bench(work, clips=6, seconds=1.0, size="128x72", workers=4)
+        stages = {s["stage"]: s for s in res["stages"]}
+        self.assertEqual(set(stages), {"synth", "probe", "score", "rescore"})
+        self.assertEqual(stages["score"]["clips"], 6)
+        # every clip comes back unchanged on the warm run: scoring is resumable (nothing re-measured)
+        self.assertEqual(res["resumable"]["unchanged_after_rescore"], 6)
+        self.assertEqual(res["resumable"]["reused_pool"], 6)
+        self.assertLessEqual(stages["rescore"]["seconds"], stages["score"]["seconds"] + 0.5)
+
+
 if __name__ == "__main__":
     unittest.main()

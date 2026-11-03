@@ -36,6 +36,14 @@ CHECKS = [(("beats", "median_abs"), "lower", 0.015), (("beats", "iqr"), "lower",
           (("hook", "action_share"), "higher", 0.2), (("sound", "voices_gap"), "higher", 0.05),
           (("select", "deterministic"), "higher", 0.0), (("qa", "median_abs"), "lower", 0.015)]
 
+# The 1.0 gate: a calibrated number must hold on a SECOND real project, not only on the one it was tuned on. These are
+# absolute floors (not a per-project regression); both projects must clear them for the calibration to be trusted.
+# (key path, direction, floor): "min" means value >= floor, "max" means value <= floor, "eq" means value == floor.
+FLOORS = [(("same", "precision"), "min", 0.95), (("people", "precision"), "min", 0.80),
+          (("beats", "median_abs"), "max", 0.02), (("qa", "median_abs"), "max", 0.045),
+          (("select", "deterministic"), "eq", 1)]
+
+
 
 def beats_part(beats: dict) -> dict:
     import vid_beats
@@ -128,12 +136,65 @@ def compare(now: dict, base: dict) -> list:
     return rows
 
 
+def _at(d: dict, path) -> object:
+    for k in path:
+        d = (d or {}).get(k)
+    return d
+
+
+def _meets(value, direction: str, floor) -> bool:
+    if value is None:
+        return False
+    if direction == "min":
+        return value >= floor
+    if direction == "max":
+        return value <= floor
+    return value == floor
+
+
+def cross_project(a: dict, b: dict) -> dict:
+    """Two project baselines against the absolute floors. Every floor present in both must hold on both; the spread is
+    reported so a number that merely passes on one project and barely passes on the other is visible. This is the
+    calibration-stability check the 1.0 milestone asks for: one trip cannot prove a threshold."""
+    rows = []
+    ok = True
+    for path, direction, floor in FLOORS:
+        va, vb = _at(a, path), _at(b, path)
+        if va is None or vb is None:
+            rows.append({"metric": ".".join(path), "floor": f"{direction} {floor}", "a": va, "b": vb,
+                         "verdict": "missing"})
+            continue
+        pa, pb = _meets(va, direction, floor), _meets(vb, direction, floor)
+        spread = round(abs(va - vb), 3) if isinstance(va, (int, float)) and isinstance(vb, (int, float)) else None
+        verdict = "ok" if (pa and pb) else "BELOW FLOOR"
+        ok = ok and pa and pb
+        rows.append({"metric": ".".join(path), "floor": f"{direction} {floor}", "a": va, "b": vb,
+                     "spread": spread, "verdict": verdict})
+    compared = [r for r in rows if r["verdict"] != "missing"]
+    return {"rows": rows, "ok": ok, "compared": len(compared), "missing": len(rows) - len(compared)}
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("--work", required=True); ap.add_argument("--chapters"); ap.add_argument("--notes")
+    ap.add_argument("--work"); ap.add_argument("--chapters"); ap.add_argument("--notes")
     ap.add_argument("--video", help="a render of this project, for the beat sync measured on its sound"); ap.add_argument("--edl")
     ap.add_argument("--save", help="write the numbers as a baseline"); ap.add_argument("--compare", help="a baseline to compare with")
+    ap.add_argument("--cross", nargs=2, metavar=("A", "B"),
+                    help="two saved baselines from different projects: check both clear the absolute floors (the 1.0 gate)")
     a = ap.parse_args(argv)
+    if a.cross:
+        base_a, base_b = vl.load_json(a.cross[0]), vl.load_json(a.cross[1])
+        res = cross_project(base_a, base_b)
+        for r in res["rows"]:
+            spread = "" if r.get("spread") is None else f"  (spread {r['spread']})"
+            print(f"  {r['metric']:22} {r['floor']:>8}   {r['a']!s:>8} / {r['b']!s:<8} {r['verdict']}{spread}")
+        if not res["ok"]:
+            print(f"CALIBRATION DOES NOT HOLD across the two projects ({res['compared']} metrics compared)")
+            return 1
+        print(f"calibration holds on both projects ({res['compared']} metrics compared, {res['missing']} missing)")
+        return 0
+    if not a.work:
+        ap.error("--work is required (or use --cross A B to compare two saved baselines)")
     now = run(a.work, a.chapters, a.notes, a.video, a.edl)
     print(json.dumps(now, indent=2))
     if a.save:

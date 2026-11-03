@@ -284,6 +284,11 @@ def cmd_lint(a) -> int:
 
 def cmd_render(a) -> int:
     import vid_render
+    if a.verify_manifest:
+        import vid_deliver
+        report = vid_deliver.verify_manifest(a.verify_manifest, edl_path=a.edl, out_path=a.out)
+        print(vid_deliver.format_verify(report))
+        return 1 if report["verdict"] in vid_deliver.VERIFY_BAD else 0
     kw = dict(preview=a.preview, encoder=a.encoder, workdir=a.work, use_cache=not a.no_cache, force=a.force, workers=a.workers,
               hwdecode=a.hwdecode, qa=a.qa, delivery=a.delivery, target_size_mb=a.target_size_mb, bitrate=a.bitrate,
               manifest=a.manifest, bundle=a.bundle, json_out=a.json, quality=a.quality, master=a.master)
@@ -295,6 +300,8 @@ def cmd_render(a) -> int:
 
 
 def cmd_audio(a) -> int:
+    if a.action == "ab":
+        return _cmd_audio_ab(a)
     import vid_listen
     import vid_probe
     import vid_score
@@ -310,6 +317,43 @@ def cmd_audio(a) -> int:
     vid_listen.review_page(out, sounds, inv, count=a.count)
     print(f"wrote {out} and its excerpts in {out.stem}_media/: open it, label what you hear, Export, then "
           f"`python engine/tools/calibrate_audio.py --work {a.work} --labels audio_labels.json`")
+    return 0
+
+
+def _cmd_audio_ab(a) -> int:
+    """Render the edit with each sound feature on and off and write an A/B listening page (ROADMAP: the ambient bed and
+    the J/L-cuts are measured for level but need a human ear)."""
+    import vid_render
+    import vid_sfx
+    import vid_edl
+    edl_path = Path(a.edl)
+    edl = vid_edl.load(edl_path)
+    variants = vid_sfx.ab_variants(edl)
+    if len(variants) == 1:
+        print("this edit uses none of the ear-judged sound features (ambient bed, ducking, J/L-cuts); nothing to compare")
+        return 0
+    work = Path(a.work) if a.work else edl_path.resolve().parent / (edl_path.stem + "_ab")
+    work.mkdir(parents=True, exist_ok=True)
+    out = Path(a.out or edl_path.with_name(edl_path.stem + "_sound_ab.html"))
+    media = out.with_name(out.stem + "_media")
+    rendered = {}
+    for v in variants:
+        vp = work / f"{v['name']}.edl.json"
+        vl.save_json(vp, v["edl"])
+        mp4 = work / f"{v['name']}.mp4"
+        print(f"rendering '{v['name']}' ...")
+        vid_render.render(vp, out=mp4, encoder=a.encoder, preview=True, workdir=work / f"{v['name']}_work",
+                          log=lambda *_: None)
+        name = f"{v['name']}.m4a"
+        if vid_sfx.ab_excerpt(mp4, media / name, seconds=a.seconds):
+            rendered[v["name"]] = f"{media.name}/{name}"
+    base = variants[0]
+    baseline = {"label": base["label"], "audio": rendered.get(base["name"], "")}
+    items = [{"name": v["name"], "label": v["label"], "description": v["description"], "audio": rendered.get(v["name"], "")}
+             for v in variants[1:] if v["name"] in rendered]
+    out.write_text(vid_sfx.ab_page_html(edl.get("project", {}).get("name", edl_path.stem), baseline, items),
+                   encoding="utf-8")
+    print(f"wrote {out} and its excerpts in {media.name}/: open it, listen to each A/B pair, choose, then Export")
     return 0
 
 
@@ -1027,6 +1071,11 @@ def build_parser() -> argparse.ArgumentParser:
     q = asub.add_parser("review", help="an offline page of short sound excerpts to label by ear (for calibrate_audio.py)")
     q.add_argument("--work", required=True); q.add_argument("--out", help="the page (default <work>/listen.html)")
     q.add_argument("--count", type=int, default=30, help="how many excerpts (default 30, spread over the measured labels)")
+    q = asub.add_parser("ab", help="render the edit with each sound feature (ambient bed, ducking, J/L-cuts) on and off for an A/B listen")
+    q.add_argument("edl"); q.add_argument("--out", help="the A/B page (default next to the EDL)")
+    q.add_argument("--work", help="work folder for the rendered variants (default: next to the EDL)")
+    q.add_argument("--seconds", type=float, default=12.0, help="length of each A/B excerpt in seconds (default 12)")
+    q.add_argument("--encoder", default="libx264", choices=["auto", "libx264", "nvenc", "videotoolbox", "qsv"])
     p.set_defaults(fn=cmd_audio)
     p = sub.add_parser("content", help="the optional content plug-in (SigLIP): what clips show, and search in words")
     csub2 = p.add_subparsers(dest="action", required=True)
@@ -1177,6 +1226,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--target-size-mb", type=float, help="aim for this output file size in MB (two-pass bitrate on libx264)")
     p.add_argument("--bitrate", type=int, help="target video bitrate in kbit/s (overrides constant-quality encoding)")
     p.add_argument("--manifest", action="store_true", help="write a reproducibility manifest (versions, hashes) next to the output")
+    p.add_argument("--verify-manifest", help="check the EDL (and --out, if given) against this saved manifest and report what changed, instead of rendering")
     p.add_argument("--bundle", action="store_true", help="zip the EDL, brief, beats and scores for hand-off (no media)")
     p.add_argument("--json", help="also write the render result (paths, sizes, verdict) to this JSON file")
     p.add_argument("--quality", choices=["standard", "high", "max"],

@@ -2,6 +2,22 @@
 
 All notable changes to this project. Format: [Keep a Changelog](https://keepachangelog.com/). Versioning: [SemVer](https://semver.org/).
 
+## [0.30.0] - 2026-10-29 (hardening toward 1.0: CI, reproducibility, the ear, throughput)
+
+### Added
+- **CI matrix tidied and ready for macOS.** The `full` job uses an explicit `include` matrix (Linux and Windows run the full render suite) with a macOS leg (`brew install ffmpeg`) prepared to switch on once a macOS runner is available on the account; until then macOS stays on the manual QA protocol, as `SUPPORT.md` already describes. Job keys remain `[python, full, coverage]`.
+- **`render --verify-manifest FILE`.** Checks an EDL (and `--out`, if given) against a saved render manifest and reports what changed, instead of rendering. It separates the cases a plain diff cannot: *the edit changed* (different EDL or inputs) from *the same edit encoded by a different build* (same EDL, different FFmpeg/engine version, so the bytes differ), and flags the real reproducibility failure (same edit, same build, different output). Exit 1 on `edit-changed` or `same-edit-output-differs`.
+- **Sound A/B (`audio ab EDL`).** Renders the edit with each ear-judged sound feature it uses - the ambient bed, music ducking, J/L-cuts - turned on and off, and writes an offline A/B page to choose between them by ear (ROADMAP: these are measured for level but have no number for whether they *sound* better). Export writes `sound_ab.json`.
+- **Throughput benchmark (`engine/tools/bench_throughput.py`).** Synthesises N clips (no footage) and times probe, a cold score and a warm re-score, reporting clips/second and the warm speed-up - where "measured throughput on 500+ clips" and "resumable scoring" (scores are cached per file, so a second run only measures what changed) are checked.
+- **Second-project protocol (`docs/SECOND-PROJECT.md`) and `eval_real.py --cross A B`.** The 1.0 gate is that the calibration holds on a *second* real project; `--cross` checks two saved baselines against absolute floors (same-moment precision, people precision, beat and beat-sync error, selection determinism) and reports the spread, exiting non-zero if either project is below a floor.
+- **One-command local check (`engine/tools/check.py`)** mirrors the no-FFmpeg CI job (compile, CLI-doc check, fast tests); `--full` runs the whole suite. CONTRIBUTING.md now also lists the repository invariants the tests guard.
+
+### Changed
+- The engine's zero-dependency promise is now a test: `test_security.py` fails if anything under `engine/` imports a model runtime (`numpy`, `onnxruntime`, `torch`, `tokenizers` ...) or the plug-in's code in-process - perception that needs a model stays in `plugins/vision`, a separate process with its own environment. The malformed-input guarantee is extended to the 0.17-0.29 sidecar commands (a broken chapters/content/pipeline/audio file produces a one-line error, never a traceback).
+
+### Fixed
+- The Windows installer smoke step no longer assigns the read-only PowerShell `$HOME` (it threw); it overrides `$env:USERPROFILE`, which `install.ps1` resolves first. (Carried over from the 0.8.x CI work, now on `main`.)
+
 ## [0.29.0] - 2026-10-29 (phase K: the content model)
 
 ### Added
