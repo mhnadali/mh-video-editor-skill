@@ -88,6 +88,76 @@ class ManifestAndBundle(unittest.TestCase):
         self.assertTrue(fresh.exists())
 
 
+class VerifyManifest(unittest.TestCase):
+    """render --verify-manifest: tell whether an EDL (and output) still matches a saved manifest, and why it differs."""
+
+    def setUp(self):
+        self.d = helpers.tmpdir() / "verify_mb"
+        self.d.mkdir(parents=True, exist_ok=True)
+        self.edl = {"version": 1, "project": {"name": "t", "width": 90, "height": 160, "fps": 30, "duration": 2.0,
+                    "music": None}, "style": {}, "shots": [{"clip": "a.mp4", "span": [0, 2.0]}]}
+        self.path = self.d / "m.edl.json"
+        vl.save_json(self.path, self.edl)
+
+    def test_same_edit_without_an_output_is_not_a_regression(self):
+        man = vd.write_manifest(self.path, self.edl, self.d / "never_rendered.mp4")   # no output file exists
+        rep = vd.verify_manifest(man, edl_path=self.path)
+        self.assertEqual(rep["verdict"], "same-edit-not-rendered")
+        self.assertTrue(rep["edl_same"])
+        self.assertNotIn(rep["verdict"], vd.VERIFY_BAD)
+
+    def test_a_changed_edl_is_detected(self):
+        man = vd.write_manifest(self.path, self.edl, self.d / "o.mp4")
+        changed = dict(self.edl, project=dict(self.edl["project"], duration=3.0))
+        vl.save_json(self.path, changed)
+        rep = vd.verify_manifest(man, edl_path=self.path)
+        self.assertEqual(rep["verdict"], "edit-changed")
+        self.assertFalse(rep["edl_same"])
+        self.assertIn(rep["verdict"], vd.VERIFY_BAD)
+
+    def test_a_changed_input_is_detected(self):
+        clip = self.d / "a.mp4"
+        clip.write_bytes(b"first")
+        edl = dict(self.edl, shots=[{"clip": str(clip), "span": [0, 2.0]}])
+        vl.save_json(self.path, edl)
+        man = vd.write_manifest(self.path, edl, self.d / "o.mp4")
+        import os
+        clip.write_bytes(b"second, longer content")                 # size + mtime change
+        os.utime(clip, (10 ** 9, 10 ** 9))
+        rep = vd.verify_manifest(man, edl_path=self.path)
+        self.assertEqual(rep["verdict"], "edit-changed")
+        self.assertFalse(rep["inputs_same"])
+
+    def test_output_hash_identical_and_differing(self):
+        out = self.d / "o.mp4"
+        out.write_bytes(b"rendered bytes")
+        man_path = self.d / "o.manifest.json"
+        man = vd.build_manifest(self.path, self.edl, self.d / "missing.mp4")   # build without probing a real media file
+        man["output"] = {"path": vl.ffp(out), "sha256": vd._sha256(out)}       # pretend this was the rendered output
+        vl.save_json(man_path, man)
+        same = vd.verify_manifest(man_path, edl_path=self.path, out_path=out)
+        self.assertEqual(same["verdict"], "identical")
+        self.assertTrue(same["output_same"])
+        out.write_bytes(b"different bytes, same versions")
+        diff = vd.verify_manifest(man_path, edl_path=self.path, out_path=out)
+        self.assertEqual(diff["verdict"], "same-edit-output-differs")
+        self.assertIn(diff["verdict"], vd.VERIFY_BAD)
+
+    def test_a_file_that_is_not_a_manifest_is_refused(self):
+        notman = self.d / "nope.json"
+        vl.save_json(notman, {"hello": 1})
+        with self.assertRaises(vl.EngineError):
+            vd.verify_manifest(notman, edl_path=self.path)
+
+    def test_render_verify_manifest_through_the_cli(self):
+        import mh_video
+        man = vd.write_manifest(self.path, self.edl, self.d / "never.mp4")
+        self.assertEqual(mh_video.main(["render", str(self.path), "--verify-manifest", str(man)]), 0)
+        changed = dict(self.edl, project=dict(self.edl["project"], duration=9.0))
+        vl.save_json(self.path, changed)
+        self.assertEqual(mh_video.main(["render", str(self.path), "--verify-manifest", str(man)]), 1)
+
+
 class Encoders(unittest.TestCase):
     def test_detection_returns_booleans_without_crashing(self):
         hw = vr.hw_encoders()

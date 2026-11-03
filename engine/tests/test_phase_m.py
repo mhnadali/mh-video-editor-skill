@@ -77,5 +77,33 @@ class Baseline(unittest.TestCase):
         self.assertEqual(eval_real.compare({"qa": {"median_abs": 0.01}}, base), [], "only numbers present in both are compared")
 
 
+class CrossProject(unittest.TestCase):
+    """The 1.0 gate: a calibrated number has to hold on a second, different project, not only the one it was tuned on."""
+
+    def good(self) -> dict:
+        return {"same": {"precision": 1.0}, "people": {"precision": 0.9}, "beats": {"median_abs": 0.01},
+                "qa": {"median_abs": 0.03}, "select": {"deterministic": 1}}
+
+    def test_two_projects_that_both_clear_the_floors_hold(self):
+        res = eval_real.cross_project(self.good(), self.good())
+        self.assertTrue(res["ok"])
+        self.assertEqual(res["compared"], len(eval_real.FLOORS))
+        self.assertTrue(all(r["verdict"] == "ok" for r in res["rows"]))
+
+    def test_a_project_below_a_floor_fails(self):
+        weak = dict(self.good(), same={"precision": 0.80}, beats={"median_abs": 0.05})
+        res = eval_real.cross_project(self.good(), weak)
+        self.assertFalse(res["ok"])
+        verdicts = {r["metric"]: r["verdict"] for r in res["rows"]}
+        self.assertEqual(verdicts["same.precision"], "BELOW FLOOR")
+        self.assertEqual(verdicts["beats.median_abs"], "BELOW FLOOR")
+        self.assertEqual(verdicts["people.precision"], "ok")
+
+    def test_metrics_missing_from_a_baseline_are_reported_not_counted(self):
+        res = eval_real.cross_project(self.good(), {"same": {"precision": 1.0}})
+        self.assertEqual(res["compared"], 1)
+        self.assertGreater(res["missing"], 0)
+
+
 if __name__ == "__main__":
     unittest.main()

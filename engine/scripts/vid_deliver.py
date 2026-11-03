@@ -166,6 +166,83 @@ def write_manifest(edl_path, edl, out_path, result=None, manifest_path=None) -> 
     return str(mp)
 
 
+def verify_manifest(manifest_path: str | os.PathLike, edl_path: str | os.PathLike | None = None,
+                    out_path: str | os.PathLike | None = None) -> dict:
+    """Check an EDL (and optionally an output file) against a saved render manifest and say what changed.
+
+    The manifest records the engine and FFmpeg versions, a hash of the EDL, size+mtime of every input, and a hash of
+    the output. Re-measuring them now answers the reproducibility question the manifest exists for, and separates the
+    two cases that look the same to a plain diff: *the edit changed* (a different EDL or different inputs) from *the
+    same edit encoded by a different build* (same EDL, different FFmpeg or engine version, so the bytes differ).
+
+    Returns a verdict plus a change list. Verdicts:
+      identical                 - same edit and the output hash still matches
+      same-edit-different-build - same edit, output differs, and the engine or FFmpeg version differs (expected)
+      same-edit-output-differs  - same edit, same versions, yet the output differs (a real reproducibility problem)
+      same-edit-not-rendered    - same edit, but there is no output to compare (manifest had none or the file is gone)
+      edit-changed              - the EDL or an input differs from the manifest
+    """
+    man = vl.load_json(manifest_path)
+    if not isinstance(man, dict) or man.get("manifest_version") != 1:
+        raise vl.EngineError(f"{manifest_path} is not a render manifest (expected manifest_version 1)")
+    edl_p = str(edl_path or (man.get("edl") or {}).get("path") or "")
+    if not edl_p or not Path(edl_p).is_file():
+        raise vl.EngineError(f"the EDL to check was not found ({edl_p!r}); pass it as the render argument")
+    edl = vl.load_json(edl_p)
+    out_p = str(out_path or (man.get("output") or {}).get("path") or "")
+    # rebuild only the cheap, pure parts (versions, EDL hash, inputs); the output is compared by its hash below, so
+    # do not re-probe it here (a verify must not depend on FFmpeg just to hash a file).
+    cur = build_manifest(edl_p, edl, "", None)
+    changes: list[dict] = []
+
+    def add(field: str, base, now) -> bool:
+        same = base == now
+        changes.append({"field": field, "baseline": base, "current": now, "status": "same" if same else "changed"})
+        return same
+
+    engine_same = add("engine_version", man.get("engine_version"), cur.get("engine_version"))
+    ffmpeg_same = add("ffmpeg", (man.get("ffmpeg") or {}).get("version"), (cur.get("ffmpeg") or {}).get("version"))
+    edl_hash_same = add("edl_sha256", (man.get("edl") or {}).get("sha256"), (cur.get("edl") or {}).get("sha256"))
+    base_in = {r.get("path"): r for r in (man.get("inputs") or {}).get("clips") or []}
+    cur_in = {r.get("path"): r for r in (cur.get("inputs") or {}).get("clips") or []}
+    inputs_same = True
+    for path in sorted(set(base_in) | set(cur_in)):
+        if not add(f"input:{path}", base_in.get(path), cur_in.get(path)):
+            inputs_same = False
+    output_same = None
+    base_out = man.get("output") or {}
+    if base_out.get("sha256") and out_p and Path(out_p).is_file():
+        output_same = add("output_sha256", base_out["sha256"], _sha256(out_p))
+    edl_same = edl_hash_same and inputs_same
+    if not edl_same:
+        verdict = "edit-changed"
+    elif output_same is None:
+        verdict = "same-edit-not-rendered"
+    elif output_same:
+        verdict = "identical"
+    elif not (engine_same and ffmpeg_same):
+        verdict = "same-edit-different-build"
+    else:
+        verdict = "same-edit-output-differs"
+    return {"verdict": verdict, "edl_same": edl_same, "inputs_same": inputs_same, "engine_same": engine_same,
+            "ffmpeg_same": ffmpeg_same, "output_same": output_same, "changes": changes,
+            "manifest": vl.ffp(manifest_path)}
+
+
+# A verdict is a problem (worth a non-zero exit) when the edit silently changed, or the same edit on the same build
+# no longer renders the same bytes. A different build producing different bytes is expected, not a failure.
+VERIFY_BAD = {"edit-changed", "same-edit-output-differs"}
+
+
+def format_verify(report: dict) -> str:
+    lines = [f"manifest: {report['manifest']}", f"verdict: {report['verdict']}"]
+    for c in report["changes"]:
+        mark = "=" if c["status"] == "same" else "~"
+        lines.append(f"  {mark} {c['field']}: {c['baseline']!s} -> {c['current']!s}")
+    return "\n".join(lines)
+
+
+
 BUNDLE_SIDECARS = ("video-brief.md", "beats.json", "scores.json", "clips.txt")
 
 

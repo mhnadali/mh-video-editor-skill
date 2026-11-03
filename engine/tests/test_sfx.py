@@ -356,5 +356,74 @@ class Ambient(unittest.TestCase):
         self.assertTrue(wav.is_file())
 
 
+class SoundAB(unittest.TestCase):
+    """The A/B sound check: one edit turned into the baseline plus a variant for each sound feature it uses."""
+
+    def base(self):
+        return {"version": 1, "project": {"name": "ab", "width": 90, "height": 160, "fps": 30, "duration": 4.0, "music": "m.wav"},
+                "style": {}, "transitions": {"1": "slideleft"},
+                "shots": [{"clip": "a.mp4", "span": [0, 2.0]}, {"clip": "b.mp4", "span": [2.0, 4.0]}]}
+
+    def test_an_edit_with_no_ear_judged_features_has_only_the_baseline(self):
+        v = sfx.ab_variants(self.base())
+        self.assertEqual([x["name"] for x in v], ["baseline"])
+
+    def test_each_used_feature_becomes_one_variant_with_that_feature_off(self):
+        e = self.base()
+        e["style"]["ambient"] = {"level_db": -14}
+        e["style"]["sound_design"] = {"whoosh": True, "duck": True}
+        e["shots"][1]["audio"] = {"lead": 0.4}
+        names = [x["name"] for x in sfx.ab_variants(e)]
+        self.assertEqual(names, ["baseline", "ambient-off", "duck-off", "jl-off"])
+        by = {x["name"]: x["edl"] for x in sfx.ab_variants(e)}
+        self.assertNotIn("ambient", by["ambient-off"]["style"])
+        self.assertFalse(by["duck-off"]["style"]["sound_design"]["duck"])
+        self.assertTrue(by["duck-off"]["style"]["sound_design"]["whoosh"])      # only ducking changes
+        self.assertNotIn("lead", by["jl-off"]["shots"][1].get("audio", {}))
+        # the original EDL is never mutated
+        self.assertEqual(e["style"]["sound_design"]["duck"], True)
+        self.assertEqual(e["shots"][1]["audio"]["lead"], 0.4)
+
+    def test_duck_variant_only_when_ducking_is_on(self):
+        e = self.base()
+        e["style"]["sound_design"] = {"whoosh": True, "duck": False}
+        self.assertNotIn("duck-off", [x["name"] for x in sfx.ab_variants(e)])
+
+    def test_page_html_embeds_the_players_and_choices(self):
+        baseline = {"label": "as edited", "audio": "p_media/baseline.m4a"}
+        items = [{"name": "ambient-off", "label": "ambient bed off", "description": "d", "audio": "p_media/ambient-off.m4a"}]
+        html = sfx.ab_page_html("proj", baseline, items)
+        self.assertIn("baseline.m4a", html)
+        self.assertIn("ambient-off.m4a", html)
+        self.assertIn("Export choices", html)
+        self.assertNotIn("__DATA__", html)
+
+
+@NEEDS_FF
+@helpers.slow
+class SoundABRender(unittest.TestCase):
+    def test_ab_command_renders_variants_and_writes_a_page(self):
+        root = helpers.tmpdir() / "ab_render"
+        root.mkdir(parents=True, exist_ok=True)
+        clips = helpers.make_clips(root, count=2, seconds=3.0)
+        music = root / "m.wav"
+        helpers.click_track(music, bpm=120, first=0.5, seconds=6.0, step_at=None)
+        edl = {"version": 1, "project": {"name": "abx", "width": 120, "height": 214, "fps": 30, "duration": 4.0,
+               "music": vl.ffp(music)}, "style": {"grade": "neutral", "drop_flash": False, "end_flare": False,
+               "ambient": {"level_db": -12}, "sound_design": {"whoosh": True, "duck": True}}, "transitions": {"1": "slideleft"},
+               "shots": [{"clip": vl.ffp(clips[0]), "span": [0, 2.0], "src_start": 0.3},
+                         {"clip": vl.ffp(clips[1]), "span": [2.0, 4.0], "src_start": 0.3, "audio": {"lead": 0.4}}]}
+        p = root / "abx.edl.json"
+        vl.save_json(p, edl)
+        out = root / "abx_sound_ab.html"
+        rc = mh_video.main(["audio", "ab", str(p), "--out", str(out), "--seconds", "4", "--encoder", "libx264"])
+        self.assertEqual(rc, 0)
+        self.assertTrue(out.is_file())
+        html = out.read_text(encoding="utf-8")
+        for feat in ("ambient-off", "duck-off", "jl-off"):
+            self.assertTrue((out.with_name(out.stem + "_media") / f"{feat}.m4a").is_file(), feat)
+            self.assertIn(feat, html)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -319,3 +319,114 @@ def ambient_lines(segs: list[dict], first_input: int, cfg: dict) -> tuple[list[s
     else:
         lines.append(f"{''.join(labels)}amix=inputs={len(labels)}:normalize=0:duration=longest[ambbus]")
     return lines, "ambbus"
+
+
+# --------------------------------------------------------------------------- A/B sound check (judged by ear)
+# The ambient bed and the J/L-cuts are measured for level, but whether they SOUND better has no number: it needs a
+# person's ear on the real footage (see docs/ROADMAP.md and docs/SECOND-PROJECT.md). `ab_variants` turns one edit into
+# the edit as authored plus one copy per sound feature it uses, each with that feature turned off, so the two can be
+# rendered and compared. The choice stays with the listener; nothing here renders or decides.
+
+def ab_variants(edl: dict) -> list[dict]:
+    """[{name, label, description, edl}] - the edit 'baseline' plus one variant per sound feature the edit actually
+    uses (ambient bed, music ducking, J/L-cuts), each a deep copy with that one feature off. Pure dict work."""
+    import copy
+    base = {"name": "baseline", "label": "as edited", "description": "the edit's sound as authored",
+            "edl": copy.deepcopy(edl)}
+    out = [base]
+    if ambient_config(edl):
+        e = copy.deepcopy(edl)
+        (e.get("style") or {}).pop("ambient", None)
+        out.append({"name": "ambient-off", "label": "ambient bed off",
+                    "description": "the recorded sound of the shots taken out from under the music", "edl": e})
+    sd = sound_design(edl)
+    if sd and sd.get("duck"):
+        e = copy.deepcopy(edl)
+        orig = (edl.get("style") or {}).get("sound_design")
+        new_sd = dict(DEFAULT_SOUND_DESIGN)
+        if isinstance(orig, dict):
+            new_sd.update(orig)
+        new_sd["duck"] = False
+        e.setdefault("style", {})["sound_design"] = new_sd
+        out.append({"name": "duck-off", "label": "music ducking off",
+                    "description": "the music is not dipped under the whooshes and effects", "edl": e})
+    if any(isinstance(s.get("audio"), dict) and (s["audio"].get("lead") or s["audio"].get("lag"))
+           for s in edl.get("shots") or []):
+        e = copy.deepcopy(edl)
+        for s in e.get("shots") or []:
+            a = s.get("audio")
+            if isinstance(a, dict):
+                a.pop("lead", None)
+                a.pop("lag", None)
+        out.append({"name": "jl-off", "label": "J/L-cuts off",
+                    "description": "each shot's sound starts and ends with its picture (no lead or lag)", "edl": e})
+    return out
+
+
+def ab_excerpt(src: str | os.PathLike, dest, seconds: float = 12.0) -> bool:
+    """The first `seconds` of a rendered file's audio as a small mono m4a for the A/B page (sound only)."""
+    from pathlib import Path
+    dest = Path(dest)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    r = vl.run([vl.find_ffmpeg()["ffmpeg"], "-v", "error", "-y", "-t", f"{seconds:.2f}", "-i", vl.ffp(src),
+                "-vn", "-ac", "2", "-c:a", "aac", "-b:a", "128k", vl.ffp(dest)], check=False)
+    return r.returncode == 0 and dest.is_file() and dest.stat().st_size > 500
+
+
+AB_PAGE = """<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Sound A/B</title>
+<style>
+:root{--bg:#fff;--fg:#1c1c1e;--mut:#6b6b70;--line:#d9d9de;--card:#f6f6f8;--acc:#2255cc}
+@media (prefers-color-scheme:dark){:root{--bg:#161618;--fg:#ececf0;--mut:#9a9aa2;--line:#34343a;--card:#202024;--acc:#7aa2ff}}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.45 system-ui,sans-serif}
+main{max-width:860px;margin:0 auto;padding:16px}h1{font-size:20px;margin:0 0 4px}.sub{color:var(--mut);margin-bottom:12px}
+.item{border:1px solid var(--line);background:var(--card);border-radius:10px;padding:10px;margin:10px 0}
+audio{width:100%;margin:6px 0}.pair{display:grid;grid-template-columns:1fr 1fr;gap:10px}.pair .sub{margin:0}
+button{font:inherit;border:1px solid var(--line);background:var(--bg);color:var(--fg);border-radius:6px;padding:3px 9px;cursor:pointer;margin:2px 4px 2px 0}
+button.on{background:var(--acc);color:#fff;border-color:var(--acc)}.pri{background:var(--acc);color:#fff;border-color:var(--acc)}
+</style></head><body><main>
+<h1>Sound A/B</h1>
+<div class="sub">Each card plays the same edit two ways. Listen to both, then say which you prefer. These sound
+choices have no measurement - your ear decides. Press Export when done; answers are kept in the browser as you go.</div>
+<div id="items"></div>
+<p><button class="pri" id="export">Export choices</button> <span class="sub" id="count"></span></p>
+<script>
+const DATA = __DATA__;
+const KEY = 'mh-soundab:' + DATA.project + ':' + DATA.items.map(i=>i.name).join(',');
+let ans = {};
+try{ ans = JSON.parse(localStorage.getItem(KEY)||'{}') || {}; }catch(e){ ans = {}; }
+function save(){ try{ localStorage.setItem(KEY, JSON.stringify(ans)); }catch(e){} count(); }
+function count(){ document.getElementById('count').textContent = Object.keys(ans).length+' of '+DATA.items.length+' chosen'; }
+function el(t,c,x){ const e=document.createElement(t); if(c) e.className=c; if(x!==undefined) e.textContent=x; return e; }
+function player(src){ const a=el('audio'); a.controls=true; a.preload='none'; a.src=src; return a; }
+function render(){
+  const root=document.getElementById('items'); root.textContent='';
+  DATA.items.forEach(it=>{
+    const a = ans[it.name] || {};
+    const box=el('div','item'); box.append(el('b',null,it.label), el('div','sub',it.description));
+    const pair=el('div','pair');
+    const left=el('div'); left.append(el('div','sub','A — '+DATA.baseline.label), player(DATA.baseline.audio));
+    const right=el('div'); right.append(el('div','sub','B — '+it.label), player(it.audio));
+    pair.append(left,right); box.append(pair);
+    const row=el('div'); [['A','prefer A'],['B','prefer B'],['=','no difference']].forEach(([v,lab])=>{
+      const b=el('button',a.prefer===v?'on':'',lab); b.onclick=()=>{ ans[it.name]=Object.assign({},a,{prefer:v}); save(); render(); }; row.append(b); });
+    box.append(row); root.append(box);
+  });
+  count();
+}
+document.getElementById('export').onclick=()=>{
+  const choices = DATA.items.filter(it=>ans[it.name]).map(it=>({feature:it.name, prefer:ans[it.name].prefer}));
+  const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([JSON.stringify({project:DATA.project,choices},null,2)],{type:'application/json'}));
+  a.download='sound_ab.json'; a.click();
+};
+render();
+</script></main></body></html>
+"""
+
+
+def ab_page_html(project: str, baseline: dict, items: list[dict]) -> str:
+    import json
+    data = {"project": project, "baseline": baseline, "items": items}
+    return AB_PAGE.replace("__DATA__", json.dumps(data, ensure_ascii=False).replace("</", "<\\/"))
+

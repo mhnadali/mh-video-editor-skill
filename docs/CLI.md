@@ -459,7 +459,7 @@ mh_video lint [-h] [--no-files] edl
 Render the video (cached parts; --preview for half size).
 
 ```
-mh_video render [-h] [--out OUT] [--preview] [--encoder {auto,libx264,nvenc,videotoolbox,qsv}] [--work WORK] [--no-cache] [--force] [--workers WORKERS] [--hwdecode {auto,none}] [--qa] [--format FORMAT] [--all-formats] [--delivery {reels,tiktok,shorts,stories,youtube,square}] [--target-size-mb TARGET_SIZE_MB] [--bitrate BITRATE] [--manifest] [--bundle] [--json JSON] [--quality {standard,high,max}] [--master] edl
+mh_video render [-h] [--out OUT] [--preview] [--encoder {auto,libx264,nvenc,videotoolbox,qsv}] [--work WORK] [--no-cache] [--force] [--workers WORKERS] [--hwdecode {auto,none}] [--qa] [--format FORMAT] [--all-formats] [--delivery {reels,tiktok,shorts,stories,youtube,square}] [--target-size-mb TARGET_SIZE_MB] [--bitrate BITRATE] [--manifest] [--verify-manifest VERIFY_MANIFEST] [--bundle] [--json JSON] [--quality {standard,high,max}] [--master] edl
 ```
 
 | Argument | Required / default | Meaning |
@@ -480,6 +480,7 @@ mh_video render [-h] [--out OUT] [--preview] [--encoder {auto,libx264,nvenc,vide
 | `--target-size-mb TARGET_SIZE_MB` |  | aim for this output file size in MB (two-pass bitrate on libx264) |
 | `--bitrate BITRATE` |  | target video bitrate in kbit/s (overrides constant-quality encoding) |
 | `--manifest` |  | write a reproducibility manifest (versions, hashes) next to the output |
+| `--verify-manifest VERIFY_MANIFEST` |  | check the EDL (and --out, if given) against this saved manifest and report what changed, instead of rendering |
 | `--bundle` |  | zip the EDL, brief, beats and scores for hand-off (no media) |
 | `--json JSON` |  | also write the render result (paths, sizes, verdict) to this JSON file |
 | `--quality QUALITY` | one of `standard`, `high`, `max` | constant-quality level of a final render: high (default) is close to the source, max is near lossless, standard is lighter; previews are always standard |
@@ -695,7 +696,7 @@ mh_video sfx plan [-h] edl
 The footage's own sound: measure it, and a page to check it by ear.
 
 ```
-mh_video audio [-h] {scan,review} ...
+mh_video audio [-h] {scan,review,ab} ...
 ```
 
 ### `audio scan`
@@ -724,6 +725,22 @@ mh_video audio review [-h] --work WORK [--out OUT] [--count COUNT]
 | `--work WORK` | required | work folder (inventory, scores, sheets, beats live here) |
 | `--out OUT` |  | the page (default <work>/listen.html) |
 | `--count COUNT` | default `30` | how many excerpts (default 30, spread over the measured labels) |
+
+### `audio ab`
+
+Render the edit with each sound feature (ambient bed, ducking, J/L-cuts) on and off for an A/B listen.
+
+```
+mh_video audio ab [-h] [--out OUT] [--work WORK] [--seconds SECONDS] [--encoder {auto,libx264,nvenc,videotoolbox,qsv}] edl
+```
+
+| Argument | Required / default | Meaning |
+|---|---|---|
+| `edl` | required | the *.edl.json file |
+| `--out OUT` |  | the A/B page (default next to the EDL) |
+| `--work WORK` |  | work folder for the rendered variants (default: next to the EDL) |
+| `--seconds SECONDS` | default `12.0` | length of each A/B excerpt in seconds (default 12) |
+| `--encoder ENCODER` | default `libx264`; one of `auto`, `libx264`, `nvenc`, `videotoolbox`, `qsv` | video encoder (auto uses NVENC when available) |
 
 ## `music`
 

@@ -6,6 +6,16 @@
 3. If you changed a command or an argument: `python engine/tools/gen_cli_doc.py` regenerates `docs/CLI.md` (a test fails when it is stale). Every argument needs a help text (`ARG_HELP` in `mh_video.py`).
 4. Update `CHANGELOG.md` and `VERSION` (and the badge in `README.md`); a test checks they agree.
 
+In a hurry, run the no-FFmpeg CI job locally in one command: `python engine/tools/check.py` (compile + CLI-doc check + fast tests), or `python engine/tools/check.py --full` to run the whole suite.
+
+## Repository invariants (guarded by tests)
+These are checked by `test_ci.py`, `test_repo.py` and `test_cli.py`; a change that trips one fails CI, so keep them in mind:
+- The main workflow's jobs are exactly `python`, `full`, `coverage`; every `uses:` is pinned to a **major** version (`@v4`, not a SHA or `@v4.1.2`); `"3.9"` stays in the matrix; there are no `paths:` filters; indentation is two spaces, no tabs. (A Dependabot bump that pins actions to SHAs would break the major-version check - re-pin to `@vN` or update the test deliberately.)
+- `VERSION`, the top `## [x.y.z]` heading in `CHANGELOG.md`, and the `version-x.y.z-` badge in `README.md` must all agree.
+- Every `references/*.md` is linked from `SKILL.md`; relative Markdown links across the repo must resolve.
+- Every CLI argument has a help text and `docs/CLI.md` is regenerated from the parser; top-level commands match `gen_cli_doc.PIPELINE`.
+- The engine imports only the standard library and FFmpeg: no networking module, no model runtime (`numpy`, `onnxruntime`, `torch` ...). Perception that needs a model lives in `plugins/vision`, a separate process with its own environment.
+
 ## Rules
 - The engine uses only the Python standard library and targets **Python 3.9+**: no `match`, no `X | Y` outside annotations (every script starts with `from __future__ import annotations`), no f-string that reuses its own quote character, no 3.10+ library functions. A static test enforces this because CI is the only place that runs 3.9.
 - FFmpeg is the only external dependency. A new filter must be listed in `mh_video.REQUIRED_FILTERS` (every build has it) or in `vidlib.FEATURE_FILTERS` (optional, so `doctor` and `lint` can explain its absence); `test_capabilities` renders a project that uses everything and fails on an unlisted filter. Tests that need an optional filter use `helpers.requires_filters(...)`.

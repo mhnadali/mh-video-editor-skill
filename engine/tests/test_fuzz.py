@@ -182,6 +182,24 @@ class Cli(unittest.TestCase):
                            capture_output=True, text=True, env=env)
         self.assertNotEqual(r.returncode, 0)
 
+    def test_new_surface_commands_never_traceback_on_broken_sidecars(self):
+        """The 0.17-0.29 commands read sidecars (chapters, content, pipeline, audio) that a user can hand-edit. A broken
+        one must still produce a one-line error or a clean empty result - never a raw traceback."""
+        d = helpers.tmpdir() / "cli_sidecars"
+        work = d / "w"
+        work.mkdir(parents=True, exist_ok=True)
+        (d / "broken.json").write_text("{not json", encoding="utf-8")
+        (work / "pipeline.json").write_text("{not json", encoding="utf-8")       # clean walks the folder past this
+        (work / "content.json").write_text("[1, 2, 3]", encoding="utf-8")
+        cases = [("story", "select", "--beats", str(d / "broken.json"), "--chapters", str(d / "broken.json"),
+                  "--duration", "10", "--work", str(work)),
+                 ("content", "search", "hello", "--work", str(work)),
+                 ("audio", "scan", "--work", str(work)),
+                 ("clean", "--work", str(work))]
+        for args in cases:
+            code, out, err = self.run_cli(*args)
+            self.assertNotIn("Traceback", err, f"{args}: {err}")
+
 
 if __name__ == "__main__":
     unittest.main()

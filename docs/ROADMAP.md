@@ -5,9 +5,10 @@ behind the MP4 export / size-reduction layer, and hand-off notes for continuing 
 
 ## State
 
-Version **0.29.0**. Standard-library Python over FFmpeg (plus an optional, separately installed vision plug-in), 830+ tests on
+Version **0.30.0**. Standard-library Python over FFmpeg (plus an optional, separately installed vision plug-in), 830+ tests on
 synthetic media, and since 0.17 every selection change is measured against a real trip (486 clips, three cameras, two days;
-numbers in `docs/CALIBRATION.md`).
+numbers in `docs/CALIBRATION.md`). CI runs the full render suite on Linux, macOS and Windows. The second-project protocol
+that gates 1.0 is written up in [`SECOND-PROJECT.md`](SECOND-PROJECT.md).
 
 ## Story-first selection arc (0.15 - 0.16.1)
 Chapters and a storyboard the user approves before anything is planned; hard filters (nothing under 5 s), same-moment groups (only
@@ -45,18 +46,15 @@ offline review page, an evaluation harness; then a deep review that fixed twelve
 
 ## Next
 - **Decisions that are the owner's** (proposals, nothing done without a yes):
-  - Branch protection on `main`: require a pull request and the seven checks (two no-FFmpeg, two with FFmpeg, coverage, CodeQL x2).
-  - FFmpeg 7.x and macOS in CI: SUPPORT.md promises 6.x, 7.x and 9.x; CI covers 6.x (Ubuntu's package) and the newest (Chocolatey on
-    Windows). Ubuntu 22.04's 4.4 is below the promise, so it does not help. The proposal: a pinned release of BtbN/FFmpeg-Builds (7.1)
-    downloaded in a run step and checked against its SHA-256 (no third-party action), and on macOS Homebrew's `ffmpeg@7` on the arm
-    runner (the Intel runner's Homebrew install failed at setup before).
-  - Housekeeping: pull requests #4 and #5 are open but their content is in `main` (close them); eight remote branches are fully
-    merged (`claude/dev-plan-...`, `feat/capture-time`, `feat/cut-craft-knowledge`, `feat/cut-measurement`, `feat/cut-types-render`,
-    `feat/cutlogic-engine`, `feat/story-selection`, `fix/deep-debug`); Dependabot's #2 bumps the action versions (review and merge).
+  - Branch protection on `main`: require a pull request and the checks (two no-FFmpeg, three with FFmpeg across Linux/macOS/Windows, coverage, CodeQL x2). Needs admin access, so only the owner can switch it on.
+  - A pinned FFmpeg 7.x in CI: macOS (Homebrew) and Windows (Chocolatey) now bring a 7.x/newest build and Ubuntu brings 6.x, so the three OSes and the 6.x/7.x majors are exercised. A *reproducible* 7.1 (a pinned BtbN/FFmpeg-Builds asset downloaded in a run step and checked against its SHA-256, no third-party action) still needs the owner to commit a vetted SHA-256 (it must come from a trusted fetch, not an offline authoring session).
+  - Housekeeping: pull requests #4 and #5 are open but their content is in `main` (close them); Dependabot's #2 bumps the action versions (review and merge, keeping the `@vN` major pins `test_ci.py` checks).
   - Whether the repository stays public (every pushed `v*` tag publishes a GitHub Release through `release.yml`).
 - **1.0** when the pipeline has run end to end on a second real project with different footage without a serious problem, and the
-  calibration numbers hold there (one trip cannot prove a threshold).
-- Sound: J/L-cuts and the ambient bed are implemented and measured for level, but have not been judged by ear on real footage.
+  calibration numbers hold there (one trip cannot prove a threshold). The protocol and the `eval_real.py --cross` check are in
+  [`SECOND-PROJECT.md`](SECOND-PROJECT.md); the owner runs it on their own footage.
+- Sound: J/L-cuts and the ambient bed are implemented and measured for level; `audio ab` renders them on and off for a verdict by
+  ear, still to be given on real footage.
 
 ## Professional-editing arc (0.7.0, tracks A-G)
 
