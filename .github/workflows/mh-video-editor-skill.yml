@@ -37,7 +37,9 @@ jobs:
         run: python engine/tests/run_tests.py --fast
 
   # Real renders with each platform's FFmpeg. Features a build lacks (libass, libvidstab ...) make their tests skip.
-  # SUPPORT.md promises Linux, macOS and Windows; all three run the full render suite here (macOS was manual before).
+  # SUPPORT.md promises Linux, macOS and Windows; Linux and Windows run the full suite here. A macos-latest leg is
+  # ready to add to the matrix (brew install ffmpeg) once a macOS runner is available on the account - in the
+  # authoring environment it stayed queued and was cancelled, so macOS stays on the manual QA protocol for now.
   full:
     name: ${{ matrix.os }} / Python ${{ matrix.python }} / FFmpeg
     runs-on: ${{ matrix.os }}
@@ -47,8 +49,6 @@ jobs:
       matrix:
         include:
           - os: ubuntu-latest
-            python: "3.12"
-          - os: macos-latest
             python: "3.12"
           - os: windows-latest
             python: "3.12"
